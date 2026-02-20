@@ -26,31 +26,41 @@ DEFAULT_MODEL_MODE = 'continuous'
 DEFAULT_PV_MODE = 'rw'
 
 class RunnerConfig(TypedDict):
+    """
+    Attributes
+    ----------
+    remote_model_mode : str
+        Remote model mode. Determines behavior of this model's remote PVs.
+        - 'continuous': Remote input PVs are updated continuously with PV monitors, and model is evaluated on change.
+        - 'snapshot': Remote input PVs are only updated when the 'SNAPSHOT' PV is poked.
+        Default is 'continuous'
+    prefix : str
+        Additional prefix to append to PV names. May be None if you don't need any.
+        Remote PVs are unaffected by this setting, this only applies to PVs we are serving.
+    variables : Dict[str, RunnerVariable]
+        List of model variables
+    """
     class RunnerVariable(TypedDict):
-        # Name of the input or output. Must match one of the model's supported variables
+        """
+        Attributes
+        ----------
+        name : str
+            Name of the input or output. Must match one of the model's supported variables.
+        pv : str
+            Name of the PV to serve or consume. If not provided, it will be defaulted to 'name'
+        mode : str
+            Operation mode of the PV. May be one of:
+            - 'ro': Read-only PV served by this server
+            - 'rw': Read-write PV served by this server. Errors if Variable.read_only
+            - 'remote': Remote PV living on some other remote machine.
+            Default is 'rw'
+        """
         name: str
-
-        # Name of the PV
         pv: str
-
-        # may be:
-        # - 'ro': Read-only PV served by this server
-        # - 'rw': Read-write PV served by this server. Errors if Variable.read_only
-        # - 'remote': Remote PV living on some other remote machine.
-        # Default is 'rw'
         mode: str
 
-    # Remote model mode. Determines behavior of this model's remote PVs.
-    # - 'continuous': Remote input PVs are updated continuously with PV monitors, and model is evaluated on change.
-    # - 'snapshot': Remote input PVs are only updated when the 'SNAPSHOT' PV is poked.
-    # Default is 'continuous'
     remote_model_mode: str
-
-    # Additional prefix to append to PV names. May be None if you don't need any.
-    # Remote PVs are unaffected by this setting, this only applies to PVs we are serving.
     prefix: str
-
-    # List of model variables
     variables: Dict[str, RunnerVariable]
 
 class Runner:
