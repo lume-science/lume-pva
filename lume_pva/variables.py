@@ -66,7 +66,7 @@ class VariableHandler(ABC):
         raise NotImplementedError()
 
 class ScalarVariableHandler(VariableHandler):
-    """Variable handler for LUME ScalarVariables"""
+    """Variable handler for LUME ScalarVariable type"""
 
     def create_type(self, variable: ScalarVariable) -> Type:
         return NTScalar.buildType('d', control=True)

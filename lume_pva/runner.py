@@ -3,6 +3,7 @@ from lume.variables import Variable
 from p4p.server import ServerOperation
 from p4p.server.thread import SharedPV
 from p4p.client.thread import Subscription, Disconnected, RemoteError, Cancelled
+from p4p.nt import NTScalar
 from p4p import Value, Type
 from typing import Any, Dict, Callable, TypedDict
 from queue import Queue
@@ -14,6 +15,7 @@ import p4p.server
 import p4p.client.thread
 import p4p.nt
 import logging
+import pvua
 
 LOG = logging.getLogger('LumePva')
 
@@ -117,11 +119,14 @@ class Runner:
         self.subs = {}
         self.context = p4p.client.thread.Context()
         self.providers = {} # Just for renaming
+        self.snapshot_pvs = []
+        self.pv_to_var = {} # Map pv name -> variable name
+        self.pvua_context = pvua.Context()
 
         # Generate default config
         if config is None:
             config = self.generate_config(model, prefix)
-        self.config = config
+        self._config = config
 
         # Validate some configuration options
         if config.get('remote_model_mode', DEFAULT_MODEL_MODE) not in VALID_MODEL_MODES:
@@ -129,7 +134,10 @@ class Runner:
 
         # Setup PVs
         for c in self.config['variables'].values():
-            pv = c.get('pv', c['name'])
+            # Set default PV name if not provided
+            if 'pv' not in c:
+                c['pv'] = c['name']
+            pv = c['pv']
 
             # Validate some other things first
             if c['name'] not in self.model.supported_variables:
@@ -156,19 +164,29 @@ class Runner:
             self.pv_handlers[var.name] = handler
             self.types[var.name] = handler.create_type(var)
 
+            self.pv_to_var[pv] = var.name
+
             if c['mode'] in ['ro', 'rw']:
                 # Generate a PV to be served
                 self._add_pv(
-                    pv,var,
+                    pv,
+                    var,
                     ro=c['mode'] == 'ro',
                     prefix=self.config.get('prefix', '')
                 )
             else:
                 # Create a client monitor
-                self._add_monitor(pv, var)
+                self._add_client(
+                    pv,
+                    var,
+                    monitor = self.config['remote_model_mode'] == 'continuous' # Use monitor if in continuous mode
+                )
 
         # Create an informational PV (i.e. including list of variables, etc.)
         self._create_model_info()
+
+        # Create additional control PVs
+        self._create_control_pvs()
 
         # Start the server
         self.server = p4p.server.Server(providers=[self.providers])
@@ -239,12 +257,15 @@ class Runner:
         self.pvs[var.name] = pvobj
         self.providers[f'{prefix}{pv}'] = pvobj
 
-    def _add_monitor(self, pv: str, var: Variable) -> bool:
+    def _add_client(self, pv: str, var: Variable, monitor: bool) -> bool:
         """Setup a new monitor for the specified PV"""
-        self.subs[pv] = self.context.monitor(
-            pv,
-            lambda x, k=pv: self._monitor_callback(k, x)
-        )
+        if monitor:
+            self.subs[pv] = self.context.monitor(
+                pv,
+                lambda x, k=pv: self._monitor_callback(k, x)
+            )
+        else:
+            self.snapshot_pvs.append(pv)
         return True
 
     def _create_model_info(self):
@@ -268,7 +289,7 @@ class Runner:
             info = {
                 'name': v.name,
                 'read_only': v.read_only,
-                'pvname': v.name, # TODO
+                'pvname': self.config['variables'][k]['pv']
             }
             vars.append(info)
 
@@ -277,6 +298,33 @@ class Runner:
         self.pvs[pv] = SharedPV(
             initial=val
         )
+
+    def _create_control_pvs(self):
+        """Create any required control PVs"""
+        pvname = f'{self.config["prefix"]}:SNAPSHOT'
+        if pvname in self.providers:
+            raise RuntimeError(f'Fatal name conflict: {pvname} for the snapshot PV already exists!')
+
+        self.providers[pvname] = SharedPV(
+            initial=NTScalar('d').wrap(0)
+        )
+
+        @self.providers[pvname].put
+        def onPut(pv, op):
+            self.take_snapshot()
+            op.done()
+
+        return None
+
+    def take_snapshot(self) -> None:
+        """
+        Take a snapshot of the remote PVs, and simulate the model
+        """
+        LOG.debug(f'Snapshot taken for PVs: {self.snapshot_pvs}')
+        new_values = {}
+        for pv in self.snapshot_pvs:
+            new_values[self.pv_to_var[pv]] = self.pvua_context.get(pv)
+        self.queue.put(new_values)
 
     def _monitor_callback(self, pv: str, param):
         """Callback from p4p monitor updates"""
@@ -314,6 +362,11 @@ class Runner:
         value['timeStamp']['nanoseconds'] = math.fmod(ts, 1.0) * 1e9
         value['timeStamp']['secondsPastEpoch'] = int(ts)
 
+    @property
+    def config(self) -> RunnerConfig:
+        """Access the underlying config"""
+        return self._config
+
     def run(self):
         """
         Runs the simulation, blocks forever.
@@ -321,16 +374,19 @@ class Runner:
         """
         while True:
             up = self.queue.get()
+            new_values = {}
             for k, v in up.items():
-                # Unpack value and add it to the new list of PVs
-                self.new_values[k] = self.pv_handlers[k].unpack_value(
-                    self.model.supported_variables[k],
-                    v
-                )
+                # If needed, unpack value and add it to the new list of PVs
+                if isinstance(v, Value):
+                    new_values[k] = self.pv_handlers[k].unpack_value(
+                        self.model.supported_variables[k],
+                        v
+                    )
+                else:
+                    new_values[k] = v
 
             # Set and simulate
-            self.model.set(self.new_values)
-            self.new_values = {}
+            self.model.set(new_values)
 
             # Get new simulated values
             out_values = self.model.get(self.model.supported_variables)

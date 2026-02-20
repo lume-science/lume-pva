@@ -102,7 +102,7 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('-v', action='store_true', help='Enable verbose logging')
-    parser.add_argument('--auto', action='store_true', help='Hooks the math model up to a dummy PVA server')
+    parser.add_argument('--mode', type=str, choices=['local', 'remote', 'snapshot'], default='local', help='Mode to run the test in')
     args = parser.parse_args()
 
     # Configure logging for debug if requested
@@ -110,7 +110,7 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG if args.v else logging.INFO)
 
     # If running in auto mode, provision a dummy server that gives random values for PVs
-    if args.auto:
+    if args.mode in ['snapshot', 'remote']:
         sim = SimpleSimulator(pvs={
             'input_a': {
                 'type': 'float',
@@ -130,8 +130,11 @@ if __name__ == '__main__':
     model = SimpleMathModel()
     config = Runner.generate_config(model)
 
-    for k in ['input_a', 'input_b']:
-        config['variables'][k]['mode'] = 'remote'
+    config['remote_model_mode'] = 'continuous' if args.mode == 'remote' else 'snapshot'
+
+    if args.mode in ['remote', 'snapshot']:
+        for k in ['input_a', 'input_b']:
+            config['variables'][k]['mode'] = 'remote'
 
     runner = Runner(model=model, config=config)
     runner.run()
