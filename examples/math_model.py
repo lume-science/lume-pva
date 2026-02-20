@@ -126,5 +126,12 @@ if __name__ == '__main__':
             }
         })
 
-    runner = Runner(model=SimpleMathModel(), client=args.auto)
+
+    model = SimpleMathModel()
+    config = Runner.generate_config(model)
+
+    for k in ['input_a', 'input_b']:
+        config['variables'][k]['mode'] = 'remote'
+
+    runner = Runner(model=model, config=config)
     runner.run()

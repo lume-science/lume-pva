@@ -4,8 +4,9 @@ from p4p.server import ServerOperation
 from p4p.server.thread import SharedPV
 from p4p.client.thread import Subscription, Disconnected, RemoteError, Cancelled
 from p4p import Value, Type
-from typing import Any, Dict, Callable
+from typing import Any, Dict, Callable, TypedDict
 from queue import Queue
+from enum import IntEnum
 from lume_pva.variables import VariableHandler, find_variable_handler
 import time
 import math
@@ -15,6 +16,40 @@ import p4p.nt
 import logging
 
 LOG = logging.getLogger('LumePva')
+
+VALID_PV_MODES = ['rw', 'ro', 'remote']
+VALID_MODEL_MODES = ['continuous', 'snapshot']
+
+DEFAULT_MODEL_MODE = 'continuous'
+DEFAULT_PV_MODE = 'rw'
+
+class RunnerConfig(TypedDict):
+    class RunnerVariable(TypedDict):
+        # Name of the input or output. Must match one of the model's supported variables
+        name: str
+
+        # Name of the PV
+        pv: str
+
+        # may be:
+        # - 'ro': Read-only PV served by this server
+        # - 'rw': Read-write PV served by this server. Errors if Variable.read_only
+        # - 'remote': Remote PV living on some other remote machine.
+        # Default is 'rw'
+        mode: str
+
+    # Remote model mode. Determines behavior of this model's remote PVs.
+    # - 'continuous': Remote input PVs are updated continuously with PV monitors, and model is evaluated on change.
+    # - 'snapshot': Remote input PVs are only updated when the 'SNAPSHOT' PV is poked.
+    # Default is 'continuous'
+    remote_model_mode: str
+
+    # Additional prefix to append to PV names. May be None if you don't need any.
+    # Remote PVs are unaffected by this setting, this only applies to PVs we are serving.
+    prefix: str
+
+    # List of model variables
+    variables: Dict[str, RunnerVariable]
 
 class Runner:
     """Simple runner for LUMEModel derived models"""
@@ -34,13 +69,14 @@ class Runner:
         model: LUMEModel
         variable: Variable
 
-        def __init__(self, variable: Variable, runner):
+        def __init__(self, variable: Variable, runner, read_only: bool):
             self.model = runner.model
             self.variable = variable
             self.runner = runner
+            self.ro = read_only
 
         def put(self, pv: SharedPV, op: ServerOperation):
-            if self.variable.read_only:
+            if self.ro:
                 op.done(error='Read only PV')
             else:
                 # Update PVs in simulator
@@ -51,16 +87,11 @@ class Runner:
         def rpc(self, op: ServerOperation):
             op.done()
 
-    def default_renamer(name: str, variable: Variable):
-        """Default PV name transformer that does nothing"""
-        return name
-
     def __init__(
             self, 
             model: LUMEModel,
-            client=False,
             prefix='',
-            renamer: Callable[[str, Variable], str] = default_renamer
+            config: RunnerConfig | None = None,
         ):
         """
         Init a Runner for the specified model
@@ -69,21 +100,12 @@ class Runner:
         ----------
         model : LUMEModel
             A LUMEModel object implementing the LUMEModel interface
-        client : bool
-            If true, setup inputs as client monitors and update the model as these update
         prefix: str
             Prefix to append to PV names. Only applies to PVs served by the Runner
-        renamer : Callable[[str], str]
-            Callable object that renames the specified variable before creating a PV. This can be used to map
-            variable names to different PV names.
-            Renamers are run for all input and output variables.
-            For example, you can uppercase all served variables with:
-            
-            def myrenamer(name):
-                return name.upper()
-
-            If input_prefix or output_prefix is also specified, they will be applied on top of the renamer.
-
+        config: RunnerConfig|None
+            Configuration for this runner. If 'None' a default configuration is generated.
+            Note that you may call Runner.generate_config yourself to get+modify a configuration.
+            Overrides the 'prefix' parameter.
         """
         self.model = model
         self.pvs = {}
@@ -96,35 +118,134 @@ class Runner:
         self.context = p4p.client.thread.Context()
         self.providers = {} # Just for renaming
 
-        # Build a list of PVs
-        for k, v in model.supported_variables.items():
-            handler = find_variable_handler(type(v))
+        # Generate default config
+        if config is None:
+            config = self.generate_config(model, prefix)
+        self.config = config
+
+        # Validate some configuration options
+        if config.get('remote_model_mode', DEFAULT_MODEL_MODE) not in VALID_MODEL_MODES:
+            raise KeyError(f'Model has invalid model mode {config["remote_model_mode"]}. Must be one of {VALID_MODEL_MODES}')
+
+        # Setup PVs
+        for c in self.config['variables'].values():
+            pv = c.get('pv', c['name'])
+
+            # Validate some other things first
+            if c['name'] not in self.model.supported_variables:
+                raise KeyError(f'Variable "{c["name"]}" not found in model variables')
+            if 'mode' in c and c['mode'] not in VALID_PV_MODES:
+                raise KeyError(f'Variable "{c["name"]} has invalid mode "{c["mode"]}". Must be one of {VALID_PV_MODES}')
+
+            # Lookup variable based on name
+            var = self.model.supported_variables[c['name']]
+
+            # Determine a default mode, if there is none
+            if 'mode' not in c:
+                c['mode'] = 'ro' if var.read_only else 'rw'
+
+            # Validate r/w setting
+            if c['mode'] == 'rw' and var.read_only:
+                raise ValueError(f'Variable {c["name"]} was configured with read-write permissions, but the variable is read-only')
+
+            handler = find_variable_handler(type(var))
             if handler is None:
-                raise RuntimeError(f'Unknown type "{type(v)}"')
+                raise RuntimeError(f'Unknown type "{type(var)}"')
 
-            self.pv_handlers[k] = handler
-            self.types[k] = handler.create_type(v)
+            # Cache handler and type for later
+            self.pv_handlers[var.name] = handler
+            self.types[var.name] = handler.create_type(var)
 
-            # This is asked to be created as a remote variable
-            # TODO: Probably need a better way to determine this
-            if client and not v.read_only:
-                self.subs[k] = self.context.monitor(
-                    renamer(k, v),
-                    lambda x, k=k: self._monitor_callback(k, x)
+            if c['mode'] in ['ro', 'rw']:
+                # Generate a PV to be served
+                self._add_pv(
+                    pv,var,
+                    ro=c['mode'] == 'ro',
+                    prefix=self.config.get('prefix', '')
                 )
-                continue
+            else:
+                # Create a client monitor
+                self._add_monitor(pv, var)
 
-            # Create a PV for the variable
-            pvobj = SharedPV(
-                handler=Runner.Handler(variable=v, runner=self),
-                initial=self._generate_value(k, None)
-            )
-            self.pvs[k] = pvobj
-            self.providers[f'{prefix}{renamer(k, v)}'] = pvobj
-
+        # Create an informational PV (i.e. including list of variables, etc.)
         self._create_model_info()
 
+        # Start the server
         self.server = p4p.server.Server(providers=[self.providers])
+
+    @staticmethod
+    def generate_config(
+        model: LUMEModel,
+        prefix: str = '',
+        remote_inputs: bool = False,
+    ) -> RunnerConfig:
+        """
+        Generate a configuration for the specified model.
+
+        Parameters
+        ----------
+        model : LUMEModel
+            Instance of a LUMEModel object
+        prefix : str
+            PV name prefix
+        remote_inputs : bool
+            When true, model inputs (values not marked as rw) are configured as monitors for remote variables
+
+        Returns
+        -------
+        RunnerConfig :
+            A new configuration built based on the supplied parameters. May be tweaked as you wish before
+            passing to the Runner() constructor.
+        """
+        config = {
+            'remote_model_mode': 'continuous',
+            'prefix': prefix,
+            'variables': {}
+        }
+        for k, v in model.supported_variables.items():
+            mode = 'ro' if v.read_only else 'rw'
+            if remote_inputs and not v.read_only:
+                mode = 'remote'
+            config['variables'][k] = {
+                'name': k,
+                'pv': k,
+                'mode': mode,
+            }
+        return config
+
+    def _add_pv(self, pv: str, var: Variable, ro: bool, prefix: str) -> None:
+        """
+        Create a new PV
+
+        Parameters
+        ----------
+        pv : str
+            Name of the PV
+        var : Variable
+            LUME variable this PV is implementing
+        ro : bool
+            True if read-only
+        prefix : str
+            String to prefix the PV name with
+        """
+        pvobj = SharedPV(
+            handler=Runner.Handler(
+                variable=var,
+                runner=self,
+                read_only=ro
+            ),
+            initial=self._generate_value(pv, None)
+        )
+        self.pvs[var.name] = pvobj
+        self.providers[f'{prefix}{pv}'] = pvobj
+
+    def _add_monitor(self, pv: str, var: Variable) -> bool:
+        """Setup a new monitor for the specified PV"""
+        self.subs[pv] = self.context.monitor(
+            pv,
+            lambda x, k=pv: self._monitor_callback(k, x)
+        )
+        return True
 
     def _create_model_info(self):
         """Creates a model info PV"""
