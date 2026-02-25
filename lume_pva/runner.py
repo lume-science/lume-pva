@@ -311,7 +311,7 @@ class Runner:
 
     def _create_control_pvs(self):
         """Create any required control PVs"""
-        pvname = f'{self.config["prefix"]}:SNAPSHOT'
+        pvname = f'{self.config["prefix"]}SNAPSHOT'
         if pvname in self.providers:
             raise RuntimeError(f'Fatal name conflict: {pvname} for the snapshot PV already exists!')
 
