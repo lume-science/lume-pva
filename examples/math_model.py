@@ -120,8 +120,8 @@ if __name__ == '__main__':
             },
             'input_b': {
                 'type': 'float',
-                'mode': 'random_uniform',
-                'range': [-100, 100],
+                'mode': 'expr',
+                'expr': '100*sin(0.5 * t)',
                 'rate': 1
             }
         })

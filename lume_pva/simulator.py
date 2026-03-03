@@ -62,6 +62,13 @@ class SimpleSimulator():
         self.should_exit = False
         self.sleep_time = 0.001
 
+        # Build list of globals for eval() calls
+        self.math_globals = {'t': 0}
+        for k, v in math.__dict__.items():
+            if k.startswith('__'):
+                continue
+            self.math_globals[k] = v
+
         # Create PVs
         self.providers = {}
         for k, v in self.pvs.items():
@@ -93,6 +100,7 @@ class SimpleSimulator():
 
     def _update_pvs(self):
         """Update the simulated PVs"""
+        self.math_globals['t'] = time.time()
         for k, v in self.pvs.items():
             nv = None
             typ = v.get('mode', 'random_uniform')
@@ -110,6 +118,15 @@ class SimpleSimulator():
                         v['range'][0],
                         v['range'][1]
                     )
+
+            # Math expressions
+            if typ == 'expr' or type == 'expression':
+                if 'expr' in v:
+                    nv = eval(
+                        f'{v["expr"]}',
+                        globals=self.math_globals
+                    )
+
             # Constants
             elif typ == 'const':
                 pass # Nothing to do for constants
