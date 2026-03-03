@@ -270,9 +270,9 @@ class Runner:
     def _add_client(self, pv: str, var: Variable, monitor: bool) -> bool:
         """Setup a new monitor for the specified PV"""
         if monitor:
-            self.subs[pv] = self.context.monitor(
+            self.subs[pv] = self.pvua_context.monitor(
                 pv,
-                lambda x, k=pv: self._monitor_callback(k, x)
+                self._monitor_callback
             )
         else:
             self.snapshot_pvs.append(pv)
@@ -336,16 +336,9 @@ class Runner:
             new_values[self.pv_to_var[pv]] = self.pvua_context.get(pv)
         self.queue.put(new_values)
 
-    def _monitor_callback(self, pv: str, param):
+    def _monitor_callback(self, **kwargs):
         """Callback from p4p monitor updates"""
-        if isinstance(param, Value) or hasattr(param, 'raw'):
-            unpacked = self.pv_handlers[pv].unpack_value(
-                self.model.supported_variables[pv],
-                param.raw
-            )
-            self.queue.put({pv: param.raw})
-        else:
-            print(type(param))
+        self.queue.put({kwargs['pvname']: kwargs['value']})
 
     def _generate_value(self, pv: str, value: Any | None) -> Value:
         """
