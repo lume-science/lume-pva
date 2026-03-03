@@ -1,10 +1,11 @@
 from abc import ABC, abstractmethod
-from lume.variables import Variable, ScalarVariable
+from lume.variables import Variable, ScalarVariable, NDVariable
 from typing import Any, Dict
 from p4p import Type, Value
-from p4p.nt import NTScalar
+from p4p.nt import NTScalar, NTNDArray
 from lume_pva.epics import epicsAlarmSeverity, epicsAlarmStatus
-
+from numpy import ndarray
+import numpy as np
 
 class VariableHandler(ABC):
     """Base class for all variable type handlers"""
@@ -83,6 +84,9 @@ class ScalarVariableHandler(VariableHandler):
             v['control']['limitLow'] = variable.value_range[0]
             v['control']['limitHigh'] = variable.value_range[1]
 
+        if variable.unit is not None:
+            v['display']['units'] = variable.unit
+
         # This should arguably be moved somewhere else. Since value_range is specific to
         # variable types, we pretty much have to handle it here.
         # TODO: Could detect presence of limitLow/limitHigh in common code, and set based on that
@@ -102,6 +106,15 @@ class ScalarVariableHandler(VariableHandler):
     def unpack_value(self, variable: ScalarVariable, value: Value) -> float:
         return float(value['value'])
 
+
+class NDVariableHandler(VariableHandler):
+    """Variable handler for LUME NDVariable type"""
+
+    def create_type(self, variable: NDVariable) -> Type:
+        pass
+    
+    def pack_value(self, variable: NDVariable, type: Type, value: ndarray | None) -> Value:
+        pass
 
 def find_variable_handler(type) -> VariableHandler | None:
     VARIABLE_HANDLERS = {
