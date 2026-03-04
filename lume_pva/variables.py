@@ -70,11 +70,14 @@ class ScalarVariableHandler(VariableHandler):
     """Variable handler for LUME ScalarVariable type"""
 
     def create_type(self, variable: ScalarVariable) -> Type:
-        return NTScalar.buildType('d', control=True)
+        return NTScalar.buildType('d', control=True, display=True)
 
     def pack_value(self, variable: ScalarVariable, type: Type, value: float | None) -> Value:
         if value is None: # Use default if not provided
-            value = variable.default_value
+            if variable.default_value is None:
+                value = 0
+            else:
+                value = variable.default_value
 
         v = Value(
             type, {'value': value}
@@ -87,7 +90,7 @@ class ScalarVariableHandler(VariableHandler):
         if variable.unit is not None:
             v['display']['units'] = variable.unit
 
-        # This should arguably be moved somewhere else. Since value_range is specific to
+        # This should arguably be moved somewhere else..but since value_range is specific to
         # variable types, we pretty much have to handle it here.
         # TODO: Could detect presence of limitLow/limitHigh in common code, and set based on that
         if variable.value_range is not None:
@@ -110,14 +113,71 @@ class ScalarVariableHandler(VariableHandler):
 class NDVariableHandler(VariableHandler):
     """Variable handler for LUME NDVariable type"""
 
+    def _typecode(self, variable: NDVariable) -> str:
+        match variable.dtype:
+            case np.float64:
+                return 'doubleValue'
+            case np.float32:
+                return 'floatValue'
+            case np.byte:
+                return 'byteValue'
+            case np.bool:
+                return 'booleanValue'
+            case np.int16:
+                return 'shortValue'
+            case np.int32:
+                return 'intValue'
+            case np.int64:
+                return 'longValue'
+            case np.ubyte:
+                return 'ubyteValue'
+            case np.uint16:
+                return 'ushortValue'
+            case np.uint32:
+                return 'uintValue'
+            case np.uint64:
+                return 'ulongValue'
+            case _:
+                raise TypeError(f'Unsupported numpy type {variable.dtype}')
+
     def create_type(self, variable: NDVariable) -> Type:
-        pass
+        return NTNDArray.buildType()
     
     def pack_value(self, variable: NDVariable, type: Type, value: ndarray | None) -> Value:
-        pass
+        if value is None: # Use default if not provided
+            if variable.default_value is not None:
+                value = variable.default_value
+            else:
+                value = np.zeros(shape=variable.shape, dtype=variable.dtype)
+
+        v = Value(
+            type, {'value': (self._typecode(variable), value.flatten())}
+        )
+
+        v['compressedSize'] = value.nbytes
+        v['uncompressedSize'] = value.nbytes
+        
+        v['dimension'] = [{
+                'size': dim,
+                'fullSize': dim, # No compression
+                'binning': 1,
+                'reverse': False,
+                'offset': 0
+        } for dim in variable.shape]
+
+        return v
+
+    def unpack_value(self, variable: NDVariable, value: Value) -> ndarray:
+        arr = value['value']
+        if isinstance(arr, np.ndarray):
+            return arr.reshape(variable.shape)
+        else:
+            raise ValueError(f'Internal error: invalid value type {type(arr)}')
+
 
 def find_variable_handler(type) -> VariableHandler | None:
     VARIABLE_HANDLERS = {
         ScalarVariable: ScalarVariableHandler(),
+        NDVariable: NDVariableHandler(),
     }
     return VARIABLE_HANDLERS.get(type, None)
