@@ -5,10 +5,11 @@ import random
 import time
 import pcaspy
 import copy
-from p4p.nt import NTScalar
+from p4p.nt import NTScalar, NTNDArray
 from p4p.server import Server
 from p4p.server.thread import SharedPV
-from typing import Dict
+from typing import Dict, Any
+import numpy as np
 
 class SimpleSimulator():
     """Simple PV simulator for float PVs"""
@@ -38,6 +39,12 @@ class SimpleSimulator():
         if mode not in SimpleSimulator.ca_mode_lookup.keys():
             raise ValueError(f'Unknown type {mode} found in config')
         return SimpleSimulator.ca_mode_lookup[mode]
+
+    def _nt_wrapper(self, type: str) -> Any:
+        if type in ['float', 'int']:
+            return NTScalar(self._mode_to_pva_type(type))
+        elif type in ['array1d']:
+            return NTNDArray() 
 
     def __init__(self, pvs: dict):
         """
@@ -72,18 +79,29 @@ class SimpleSimulator():
         # Create PVs
         self.providers = {}
         for k, v in self.pvs.items():
+            typ = v.get('type', 'float')
             self.providers[k] = SharedPV(
-                nt=NTScalar(self._mode_to_pva_type(v.get('type', 'float'))),
-                initial=v.get('init', 0)
+                nt=self._nt_wrapper(typ),
+                initial=self._initial(v)
             )
-            self.server.createPV('', {
-                k: {
-                    'type': self._mode_to_ca_type(v.get('type', 'float')),
-                    'default': v.get('init', 0),
-                    'prec': 3,
-                    'scan': 1
-                }
-            })
+            if typ in ['float', 'int']:
+                self.server.createPV('', {
+                    k: {
+                        'type': self._mode_to_ca_type(typ),
+                        'default': v.get('init', 0),
+                        'prec': 3,
+                        'scan': 1
+                    }
+                })
+            elif typ in ['array1d']:
+                self.server.createPV('', {
+                    k: {
+                        'count': v.get('nvalues', 512),
+                        'prec': 3,
+                        'scan': 1,
+                        'default': self._initial(v)
+                    }
+                })
 
         # Create PVA server
         self.pva_srv = Server(providers=[self.providers])
@@ -97,6 +115,21 @@ class SimpleSimulator():
         while not self.should_exit:
             self._update_pvs()
             self.server.process(self.sleep_time)
+
+    def _initial(self, v: dict):
+        if v.get('type', 'float') in ['float', 'int']:
+            return v.get('init', 0)
+        else:
+            return v.get('init', np.zeros(shape=(v.get('nvalues', 512)), dtype=np.float64))
+
+    def _generate_array(self, st: float, dt: float, values: int, expr: str) -> np.ndarray:
+        """Generate an array with an eval string"""
+        step = dt / values
+        a = np.ndarray(shape=(values), dtype=np.float64)
+        for i in range(values):
+            self.math_globals['t'] = st + step * i
+            a[i] = eval(expr, self.math_globals)
+        return a
 
     def _update_pvs(self):
         """Update the simulated PVs"""
@@ -120,11 +153,19 @@ class SimpleSimulator():
                     )
 
             # Math expressions
-            if typ == 'expr' or type == 'expression':
-                if 'expr' in v:
+            if typ == 'expr' or typ == 'expression':
+                assert 'expr' in v
+                if v['type'] == 'array1d':
+                    nv = self._generate_array(
+                        time.time(),
+                        v.get('rate', 0.1),
+                        v.get('nvalues', 512),
+                        v['expr']
+                    )
+                else:
                     nv = eval(
-                        f'{v["expr"]}',
-                        globals=self.math_globals
+                        v['expr'],
+                        self.math_globals
                     )
 
             # Constants
