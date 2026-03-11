@@ -3,8 +3,8 @@ requires = ["setuptools>=75.0", "setuptools_scm[toml]"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "lume-model"
-description = "Data structures used in the LUME modeling toolset."
+name = "lume-pva"
+description = ""
 readme = "README.md"
 authors = [
   { name = "SLAC National Accelerator Laboratory"},
@@ -26,7 +26,8 @@ dependencies = [
     "pyyaml",
     "torch",
     "botorch>=0.15",
-    "lume-base"
+    "lume-base",
+	"pvua@git+ssh://git@github.com/slac-epics/pvua.git",
 ]
 dynamic = ["version"]
 [tool.setuptools_scm]
@@ -46,9 +47,8 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/slaclab/lume-model"
-Documentation = "https://slaclab.github.io/lume-model/"
-"Bug Tracker" = "https://github.com/slaclab/lume-model/issues"
+Homepage = "https://github.com/lume-science/lume-pva"
+"Bug Tracker" = "https://github.com/lume-science/lume-pva/issues"
 
 [project.license]
 file = "LICENSE"
