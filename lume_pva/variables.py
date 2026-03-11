@@ -72,18 +72,18 @@ class ScalarVariableHandler(VariableHandler):
     def create_type(self, variable: ScalarVariable) -> Type:
         return NTScalar.buildType('d', control=True, display=True)
 
-    def pack_value(self, variable: ScalarVariable, type: Type, value: float | None) -> Value:
+    def pack_value(self, variable: ScalarVariable, type_: Type, value: float | None) -> Value:
         if value is None: # Use default if not provided
             if variable.default_value is None:
                 value = 0
             else:
                 value = variable.default_value
 
-        if not isinstance(value, float):
-            raise ValueError(f'ScalarVariable expectes a float, but got {type(value)}')
+        if not isinstance(value, (float, int)):
+            raise ValueError(f'ScalarVariable {variable.name} expects a float, but got {type(value)}')
 
         v = Value(
-            type, {'value': value}
+            type_, {'value': float(value)}
         )
 
         if variable.value_range is not None:
@@ -146,7 +146,7 @@ class NDVariableHandler(VariableHandler):
     def create_type(self, variable: NDVariable) -> Type:
         return NTNDArray.buildType()
     
-    def pack_value(self, variable: NDVariable, type: Type, value: ndarray | None) -> Value:
+    def pack_value(self, variable: NDVariable, type_: Type, value: ndarray | None) -> Value:
         if value is None: # Use default if not provided
             if variable.default_value is not None:
                 value = variable.default_value
@@ -157,7 +157,7 @@ class NDVariableHandler(VariableHandler):
             raise ValueError(f'NDVariable expectes an ndarray, but got {type(value)}')
 
         v = Value(
-            type, {'value': (self._typecode(variable), value.flatten())}
+            type_, {'value': (self._typecode(variable), value.flatten())}
         )
 
         v['compressedSize'] = value.nbytes
