@@ -201,6 +201,9 @@ class Runner:
         # Start the server
         self.server = p4p.server.Server(providers=[self.providers])
 
+        # Kick off an initial update to propagate any defaults the model may have set
+        self.queue.put({})
+
     @staticmethod
     def generate_config(
         model: LUMEModel,
