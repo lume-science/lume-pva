@@ -1,5 +1,5 @@
 from lume.model import LUMEModel, Variable
-from lume.variables import Variable
+from lume.variables import Variable, ParticleGroupVariable
 from p4p.server import ServerOperation
 from p4p.server.thread import SharedPV
 from p4p.client.thread import Subscription, Disconnected, RemoteError, Cancelled
@@ -168,6 +168,8 @@ class Runner:
 
             handler = find_variable_handler(type(var))
             if handler is None:
+                if type(var) is ParticleGroupVariable:
+                    continue # ParticleGroupVariable is a special case that doesn't have a handler
                 raise RuntimeError(f'Unknown type "{type(var)}"')
 
             # Cache handler and type for later
@@ -401,12 +403,13 @@ class Runner:
             for k, v in out_values.items():
                 LOG.debug(f'Post: {k} -> {v}')
                 
-                # Only post to outputs
-                if not self.model.supported_variables[k].read_only:
-                    continue
-                
-                self.pvs[k].post(
-                    self._generate_value(
-                        k, v
+                try:
+                    self.pvs[k].post(
+                        self._generate_value(
+                            k, v
+                        )
                     )
-                )
+                except KeyError:
+                    LOG.error(f'No PV found for {k}, cannot post value')
+                except Exception as e:
+                    LOG.error(f'Error posting value for {k}: {e}')
