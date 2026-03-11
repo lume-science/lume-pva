@@ -79,6 +79,9 @@ class ScalarVariableHandler(VariableHandler):
             else:
                 value = variable.default_value
 
+        if not isinstance(value, float):
+            raise ValueError(f'ScalarVariable expectes a float, but got {type(value)}')
+
         v = Value(
             type, {'value': value}
         )
@@ -149,6 +152,9 @@ class NDVariableHandler(VariableHandler):
                 value = variable.default_value
             else:
                 value = np.zeros(shape=variable.shape, dtype=variable.dtype)
+
+        if not isinstance(value, ndarray):
+            raise ValueError(f'NDVariable expectes an ndarray, but got {type(value)}')
 
         v = Value(
             type, {'value': (self._typecode(variable), value.flatten())}
