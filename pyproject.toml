@@ -27,7 +27,7 @@ dependencies = [
     "torch",
     "botorch>=0.15",
     "lume-base",
-	"pvua@git+ssh://git@github.com/slac-epics/pvua.git",
+    "pvua @ git+https://github.com/slac-epics/pvua"
 ]
 dynamic = ["version"]
 [tool.setuptools_scm]
