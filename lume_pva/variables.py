@@ -140,11 +140,22 @@ class NDVariableHandler(VariableHandler):
                 return 'uintValue'
             case np.uint64:
                 return 'ulongValue'
+            case np.str_:
+                return 'stringValue'
             case _:
                 raise TypeError(f'Unsupported numpy type {variable.dtype}')
 
     def create_type(self, variable: NDVariable) -> Type:
-        return NTNDArray.buildType()
+        # NTNDArray (per the NT spec) does not support string[] as a value type. We'll deviate from the standard a bit here
+        if variable.dtype in [np.str_]:
+            extras = [
+                ('value', ('U', None, [
+                    ('stringValue', 'as')
+                ])),
+            ]
+            return Type(extras, base=NTNDArray.buildType())
+        else:
+            return NTNDArray.buildType()
     
     def pack_value(self, variable: NDVariable, type_: Type, value: ndarray | None) -> Value:
         if value is None: # Use default if not provided
