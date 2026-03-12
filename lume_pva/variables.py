@@ -79,8 +79,8 @@ class ScalarVariableHandler(VariableHandler):
             else:
                 value = variable.default_value
 
-        if not isinstance(value, (float, int)):
-            raise ValueError(f'ScalarVariable {variable.name} expects a float, but got {type(value)}')
+        if not isinstance(value, (float, int, np.floating)):
+            raise ValueError(f'ScalarVariable {variable.name} expects float, int or np.floating, but got {type(value)}')
 
         v = Value(
             type_, {'value': float(value)}
