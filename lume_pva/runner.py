@@ -402,7 +402,11 @@ class Runner:
             # Update output PVs with new values
             for k, v in out_values.items():
                 LOG.debug(f'Post: {k} -> {v}')
-                
+
+                # Avoid attempting to post to client monitors
+                if k in self.subs:
+                    continue
+
                 try:
                     self.pvs[k].post(
                         self._generate_value(
