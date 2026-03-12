@@ -375,7 +375,7 @@ class Runner:
         """Access the underlying config"""
         return self._config
 
-    def run(self):
+    def _run(self):
         """
         Runs the simulation, blocks forever.
         Dequeues PV updates from the updater thread, sets values on the model, and updates outputs.
@@ -417,3 +417,15 @@ class Runner:
                     LOG.error(f'No PV found for {k}, cannot post value')
                 except Exception as e:
                     LOG.error(f'Error posting value for {k}: {e}')
+
+    def run(self):
+        """
+        Runs the simulation, blocks forever (until there's a keyboard interrupt)
+        Dequeues PV updates from the updater thread, sets values on the model, and updates outputs.
+        """
+        try:
+            self._run()
+        except KeyboardInterrupt:
+            return
+        except Exception as e:
+            raise e
