@@ -19,6 +19,7 @@ class SimpleMathModel(LUMEModel):
         self._initial_state = {
             "input_a": 1.0,
             "input_b": 1.0,
+            "input_c": 1.0,
             "sum_output": 2.0
         }
         # Current state (will be modified during simulation)
@@ -35,6 +36,13 @@ class SimpleMathModel(LUMEModel):
             ),
             "input_b": ScalarVariable(
                 name="input_b", 
+                default_value=1.0,
+                value_range=(-10.0, 10.0),
+                unit="dimensionless",
+                read_only=False
+            ),
+            "input_c": ScalarVariable(
+                name="input_c", 
                 default_value=1.0,
                 value_range=(-10.0, 10.0),
                 unit="dimensionless",
@@ -90,9 +98,10 @@ class SimpleMathModel(LUMEModel):
         # Perform calculations to update outputs
         input_a = self._state["input_a"]
         input_b = self._state["input_b"]
+        input_c = self._state["input_c"]
         
         # Calculate outputs
-        self._state["sum_output"] = input_a + input_b
+        self._state["sum_output"] = input_a + input_b + input_c
     
     def reset(self) -> None:
         """Reset the model to its initial state."""
@@ -116,13 +125,19 @@ if __name__ == '__main__':
                 'type': 'float',
                 'mode': 'random_uniform',
                 'range': [-100, 100],
-                'rate': 1
+                'rate': 0.12
             },
             'input_b': {
                 'type': 'float',
                 'mode': 'expr',
-                'expr': '100*sin(0.5 * t)',
-                'rate': 1
+                'expr': '10*sin(0.5 * t)',
+                'rate': 0.05
+            },
+            'input_c': {
+                'type': 'float',
+                'mode': 'expr',
+                'expr': '10*sin(0.325 * t)',
+                'rate': 0.09
             }
         })
 
@@ -130,10 +145,11 @@ if __name__ == '__main__':
     model = SimpleMathModel()
     config = Runner.generate_config(model)
 
+    config['update_rate'] = 1 # Update once per second
     config['remote_model_mode'] = 'continuous' if args.mode == 'remote' else 'snapshot'
 
     if args.mode in ['remote', 'snapshot']:
-        for k in ['input_a', 'input_b']:
+        for k in ['input_a', 'input_b', 'input_c']:
             config['variables'][k]['mode'] = 'remote'
 
     runner = Runner(model=model, config=config)

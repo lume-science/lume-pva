@@ -142,6 +142,8 @@ class Runner:
         if config.get('remote_model_mode', DEFAULT_MODEL_MODE) not in VALID_MODEL_MODES:
             raise KeyError(f'Model has invalid model mode {config["remote_model_mode"]}. Must be one of {VALID_MODEL_MODES}')
 
+        self.update_rate = config.get('update_rate', 0.1)
+
         # Setup PVs
         for c in self.config['variables'].values():
             # Set default PV name if not provided
@@ -382,6 +384,19 @@ class Runner:
         """
         while True:
             up = self.queue.get()
+
+            # Slightly funky batching logic; Hold off on updates while we still receive PV updates within a certain window.
+            # After that window passes, run an update. This window doesnt start running until a PV update is received
+            timeo = self.update_rate
+            last = time.time()
+            while timeo > 0:
+                try:
+                    up.update(self.queue.get(timeout=self.update_rate))
+                    timeo -= time.time() - last
+                    last = time.time()
+                except:
+                    timeo = 0
+
             new_values = {}
             for k, v in up.items():
                 # If needed, unpack value and add it to the new list of PVs

@@ -57,6 +57,7 @@ An example configuration:
 {
     'remote_model_mode': 'continuous', # Set to 'snapshot' for snapshot mode
     'prefix': 'MY_PV_PREFIX:',
+    'update_rate': 0.1, # Update period under which PVs will be batched together into one model.set(). Set to 0 to disable the window.
     'variables': {
         'input_a': {
             'name': 'input_a',
