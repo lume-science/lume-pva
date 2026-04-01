@@ -73,6 +73,35 @@ class ScalarVariableHandler(VariableHandler):
 
     ScalarType = int | float | np.floating
 
+    @staticmethod
+    def set_metadata(variable: Variable, v: Value, value: Any) -> None:
+        """
+        Sets control, display and alarm metadata on the value
+        """
+        value_range = getattr(variable, 'value_range', None)
+        if value_range is not None:
+            v['control']['limitLow'] = value_range[0]
+            v['control']['limitHigh'] = value_range[1]
+
+        unit = getattr(variable, 'unit')
+        if unit is not None:
+            v['display']['units'] = unit
+
+        # This should arguably be moved somewhere else..but since value_range is specific to
+        # variable types, we pretty much have to handle it here.
+        # TODO: Could detect presence of limitLow/limitHigh in common code, and set based on that
+        if value_range is not None:
+            if value < value_range[0]:
+                v['alarm']['severity'] = int(epicsAlarmSeverity.MAJOR_ALARM)
+                v['alarm']['status'] = int(epicsAlarmStatus.DRIVER_STATUS)
+            elif value > value_range[1]:
+                v['alarm']['severity'] = int(epicsAlarmSeverity.MAJOR_ALARM)
+                v['alarm']['status'] = int(epicsAlarmStatus.DRIVER_STATUS)
+            else:
+                v['alarm']['severity'] = int(epicsAlarmSeverity.NO_ALARM)
+                v['alarm']['status'] = int(epicsAlarmStatus.NO_STATUS)
+
+
     def create_type(self, variable: ScalarVariable) -> Type:
         return NTScalar.buildType('d', control=True, display=True)
 
@@ -89,28 +118,7 @@ class ScalarVariableHandler(VariableHandler):
         v = Value(
             type_, {'value': float(value)}
         )
-
-        if variable.value_range is not None:
-            v['control']['limitLow'] = variable.value_range[0]
-            v['control']['limitHigh'] = variable.value_range[1]
-
-        if variable.unit is not None:
-            v['display']['units'] = variable.unit
-
-        # This should arguably be moved somewhere else..but since value_range is specific to
-        # variable types, we pretty much have to handle it here.
-        # TODO: Could detect presence of limitLow/limitHigh in common code, and set based on that
-        if variable.value_range is not None:
-            if value < variable.value_range[0]:
-                v['alarm']['severity'] = int(epicsAlarmSeverity.MAJOR_ALARM)
-                v['alarm']['status'] = int(epicsAlarmStatus.DRIVER_STATUS)
-            elif value > variable.value_range[1]:
-                v['alarm']['severity'] = int(epicsAlarmSeverity.MAJOR_ALARM)
-                v['alarm']['status'] = int(epicsAlarmStatus.DRIVER_STATUS)
-            else:
-                v['alarm']['severity'] = int(epicsAlarmSeverity.NO_ALARM)
-                v['alarm']['status'] = int(epicsAlarmStatus.NO_STATUS)
-
+        self.set_metadata(variable, v, value)
         return v
 
     def unpack_value(self, variable: ScalarVariable, value: Value) -> float:
@@ -201,8 +209,7 @@ class TorchScalarVariableHandler(VariableHandler):
     TorchScalarType = torch.Tensor | float | int
 
     def create_type(self, variable: TorchScalarVariable) -> Type:
-        # Torch scalars are pretty basic. No meta is needed or supported.
-        return NTScalar.buildType('d')
+        return NTScalar.buildType('d', control=True, display=True)
 
     def pack_value(self, variable: TorchScalarVariable, type_: Type, value: TorchScalarType | None) -> Value:
         if value is None: # Use default if not provided
@@ -214,9 +221,11 @@ class TorchScalarVariableHandler(VariableHandler):
         if not isinstance(value, (torch.Tensor, float, int)):
             raise ValueError(f'ScalarVariable {variable.name} expects torch.Tensor, int or float, but got {type(value)}')
 
-        return Value(
+        v = Value(
             type_, {'value': float(value)}
         )
+        ScalarVariableHandler.set_metadata(variable, v, float(value))
+        return v
 
     def unpack_value(self, variable: ScalarVariable, value: Value) -> float:
         return float(value['value'])
