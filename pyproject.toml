@@ -27,6 +27,7 @@ dependencies = [
     "torch",
     "botorch>=0.15",
     "lume-base",
+    "lume-torch @ git+https://github.com/lume-science/lume-torch",
     "pvua @ git+https://github.com/slac-epics/pvua"
 ]
 dynamic = ["version"]
