@@ -1,11 +1,13 @@
 from abc import ABC, abstractmethod
 from lume.variables import Variable, ScalarVariable, NDVariable
+from lume_torch.variables import TorchScalarVariable
 from typing import Any, Dict
 from p4p import Type, Value
 from p4p.nt import NTScalar, NTNDArray
 from lume_pva.epics import epicsAlarmSeverity, epicsAlarmStatus
 from numpy import ndarray
 import numpy as np
+import torch
 
 class VariableHandler(ABC):
     """Base class for all variable type handlers"""
@@ -67,12 +69,14 @@ class VariableHandler(ABC):
         raise NotImplementedError()
 
 class ScalarVariableHandler(VariableHandler):
-    """Variable handler for LUME ScalarVariable type"""
+    """Variable handler for LUME ScalarVariable, and the TorchScalarVariable type"""
+
+    ScalarType = int | float | np.floating
 
     def create_type(self, variable: ScalarVariable) -> Type:
         return NTScalar.buildType('d', control=True, display=True)
 
-    def pack_value(self, variable: ScalarVariable, type_: Type, value: float | None) -> Value:
+    def pack_value(self, variable: ScalarVariable, type_: Type, value: ScalarType | None) -> Value:
         if value is None: # Use default if not provided
             if variable.default_value is None:
                 value = 0
@@ -191,10 +195,37 @@ class NDVariableHandler(VariableHandler):
         else:
             raise ValueError(f'Internal error: invalid value type {type(arr)}')
 
+class TorchScalarVariableHandler(VariableHandler):
+    """Handler for TorchScalarVariable"""
+
+    TorchScalarType = torch.Tensor | float | int
+
+    def create_type(self, variable: TorchScalarVariable) -> Type:
+        # Torch scalars are pretty basic. No meta is needed or supported.
+        return NTScalar.buildType('d')
+
+    def pack_value(self, variable: TorchScalarVariable, type_: Type, value: TorchScalarType | None) -> Value:
+        if value is None: # Use default if not provided
+            if variable.default_value is None:
+                value = 0
+            else:
+                value = variable.default_value
+
+        if not isinstance(value, (torch.Tensor, float, int)):
+            raise ValueError(f'ScalarVariable {variable.name} expects torch.Tensor, int or float, but got {type(value)}')
+
+        return Value(
+            type_, {'value': float(value)}
+        )
+
+    def unpack_value(self, variable: ScalarVariable, value: Value) -> float:
+        return float(value['value'])
+
 
 def find_variable_handler(type) -> VariableHandler | None:
     VARIABLE_HANDLERS = {
         ScalarVariable: ScalarVariableHandler(),
         NDVariable: NDVariableHandler(),
+        TorchScalarVariable : TorchScalarVariableHandler()
     }
     return VARIABLE_HANDLERS.get(type, None)
