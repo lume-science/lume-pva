@@ -341,9 +341,9 @@ class Runner:
             new_values[self.pv_to_var[pv]] = self.pvua_context.get(pv)
         self.queue.put(new_values)
 
-    def _monitor_callback(self, **kwargs):
+    def _monitor_callback(self, pvname, value, **kwargs):
         """Callback from p4p monitor updates"""
-        self.queue.put({kwargs['pvname']: kwargs['value']})
+        self.queue.put({pvname: value})
 
     def _generate_value(self, pv: str, value: Any | None) -> Value:
         """
