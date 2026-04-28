@@ -77,9 +77,9 @@ An example configuration:
 
 Supported variable types and their metadata fields.
 
-### `ScalarVariable`
+### `ScalarVariable` and `IntVariable`
 
-Represented as **NTScalar** with a `double` value field.
+Represented as **NTScalar** with a `double` or `int` value field (depending on variable type).
 
 Supported metadata:
 * `timestamp`
