@@ -250,6 +250,59 @@ class TorchScalarVariableHandler(VariableHandler):
     def unpack_value(self, variable: ScalarVariable, value: Value) -> float:
         return float(value['value'])
 
+class SimpleScalarHandler(VariableHandler):
+    """Handler for StrVariable"""
+
+    def create_type(self, variable: StrVariable | BoolVariable):
+        return NTScalar.buildType('s' if isinstance(variable, StrVariable) else '?')
+
+    def pack_value(self, variable: StrVariable | BoolVariable, type_: Type, value: str | bool | None) -> Value:
+        if value is None:
+            if variable.default_value is None:
+                if isinstance(variable, BoolVariable):
+                    value = False
+                elif isinstance(variable, StrVariable):
+                    value = ''
+                else:
+                    raise ValueError('Unsupported variable type for SimpleScalarHandler')
+            else:
+                value = variable.default_value
+
+        if isinstance(variable, StrVariable) and not isinstance(value, str):
+            raise ValueError(f'StrVariable {variable.name} expects str, but got {type(value)}')
+        
+        if isinstance(variable, BoolVariable) and not isinstance(value, (bool, int)):
+            raise ValueError(f'StrVariable {variable.name} expects str, but got {type(value)}')
+
+        return Value(type_, {'value': value})
+    
+    def unpack_value(self, variable: StrVariable | BoolVariable, value: Value) -> str | bool:
+        if isinstance(variable, BoolVariable):
+            return bool(value['value'])
+        else:
+            return str(value['value'])
+
+class StringVariableHandler(VariableHandler):
+    """Handler for StrVariable"""
+    
+    def create_type(self, variable: BoolVariable):
+        return NTScalar.buildType('?')
+    
+    def pack_value(self, variable: StrVariable, type_: Type, value: str) -> Value:
+        if value is None:
+            if variable.default_value is None:
+                value = ''
+            else:
+                value = variable.default_value
+                
+        if not isinstance(value, str):
+            raise ValueError(f'StrVariable {variable.name} expects str, but got {type(value)}')
+        
+        return Value(type_, {'value': value})
+    
+    def unpack_value(self, variable: StrVariable, value: Value) -> str:
+        return str(value['value'])
+
 
 def find_variable_handler(type) -> VariableHandler | None:
     VARIABLE_HANDLERS = {
@@ -258,5 +311,7 @@ def find_variable_handler(type) -> VariableHandler | None:
         NDVariable: NDVariableHandler(),
         TorchScalarVariable : TorchScalarVariableHandler(),
         TorchNDVariable: NDVariableHandler(),
+        BoolVariable: SimpleScalarHandler(),
+        StrVariable: SimpleScalarHandler(),
     }
     return VARIABLE_HANDLERS.get(type, None)
