@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from lume.variables import Variable, ScalarVariable, NDVariable
-from lume_torch.variables import TorchScalarVariable
+from lume_torch.variables import TorchScalarVariable, TorchNDVariable
 from typing import Any, Dict
 from p4p import Type, Value
 from p4p.nt import NTScalar, NTNDArray
@@ -130,27 +130,27 @@ class NDVariableHandler(VariableHandler):
 
     def _typecode(self, variable: NDVariable) -> str:
         match variable.dtype:
-            case np.float64:
+            case np.float64 | torch.float64:
                 return 'doubleValue'
-            case np.float32:
+            case np.float32 | torch.float32:
                 return 'floatValue'
-            case np.byte:
+            case np.byte | torch.int8:
                 return 'byteValue'
-            case np.bool:
+            case np.bool | torch.bool:
                 return 'booleanValue'
-            case np.int16:
+            case np.int16 | torch.int16:
                 return 'shortValue'
-            case np.int32:
+            case np.int32 | torch.int32:
                 return 'intValue'
-            case np.int64:
+            case np.int64 | torch.int64:
                 return 'longValue'
-            case np.ubyte:
+            case np.ubyte | torch.uint8:
                 return 'ubyteValue'
-            case np.uint16:
+            case np.uint16 | torch.uint16:
                 return 'ushortValue'
-            case np.uint32:
+            case np.uint32 | torch.uint32:
                 return 'uintValue'
-            case np.uint64:
+            case np.uint64 | torch.uint64:
                 return 'ulongValue'
             case np.str_:
                 return 'stringValue'
@@ -169,15 +169,21 @@ class NDVariableHandler(VariableHandler):
         else:
             return NTNDArray.buildType()
     
-    def pack_value(self, variable: NDVariable, type_: Type, value: ndarray | None) -> Value:
+    def pack_value(self, variable: NDVariable | TorchNDVariable, type_: Type, value: ndarray | torch.Tensor | None) -> Value:
         if value is None: # Use default if not provided
             if variable.default_value is not None:
                 value = variable.default_value
-            else:
+            elif isinstance(variable, TorchNDVariable):
+                value = torch.zeros(size=variable.shape, dtype=variable.dtype)
+            elif isinstance(variable, NDVariable):
                 value = np.zeros(shape=variable.shape, dtype=variable.dtype)
 
         if not isinstance(value, ndarray):
             raise ValueError(f'NDVariable expectes an ndarray, but got {type(value)}')
+
+        # Convert to numpy type for p4p's sake
+        if isinstance(variable, TorchNDVariable):
+            value = value.numpy()
 
         v = Value(
             type_, {'value': (self._typecode(variable), value.flatten())}
@@ -196,10 +202,13 @@ class NDVariableHandler(VariableHandler):
 
         return v
 
-    def unpack_value(self, variable: NDVariable, value: Value) -> ndarray:
+    def unpack_value(self, variable: NDVariable | TorchNDVariable, value: Value) -> ndarray | torch.Tensor:
         arr = value['value']
         if isinstance(arr, np.ndarray):
-            return arr.reshape(variable.shape)
+            if isinstance(variable, TorchNDVariable):
+                return torch.reshape(torch.from_numpy(arr), variable.shape)
+            else:
+                return arr.reshape(variable.shape)
         else:
             raise ValueError(f'Internal error: invalid value type {type(arr)}')
 
@@ -235,6 +244,7 @@ def find_variable_handler(type) -> VariableHandler | None:
     VARIABLE_HANDLERS = {
         ScalarVariable: ScalarVariableHandler(),
         NDVariable: NDVariableHandler(),
-        TorchScalarVariable : TorchScalarVariableHandler()
+        TorchScalarVariable : TorchScalarVariableHandler(),
+        TorchNDVariable: NDVariableHandler(),
     }
     return VARIABLE_HANDLERS.get(type, None)
