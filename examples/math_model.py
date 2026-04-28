@@ -21,6 +21,8 @@ class SimpleMathModel(LUMEModel):
             "input_b": 1.0,
             "input_c": 1.0,
             "input_d": 1,
+            "invert": False,
+            "desc": "Hello, world!",
             "sum_output": 2.0,
         }
         # Current state (will be modified during simulation)
@@ -55,6 +57,16 @@ class SimpleMathModel(LUMEModel):
                 value_range=(-10, 10),
                 unit="dimensionless",
                 read_only=False
+            ),
+            "invert": BoolVariable(
+                name="invert",
+                default_value=False,
+                read_only=False,
+            ),
+            "desc": StrVariable(
+                name="desc",
+                default_value="Hello, world!",
+                read_only=True
             ),
             "sum_output": ScalarVariable(
                 name="sum_output",
@@ -108,9 +120,12 @@ class SimpleMathModel(LUMEModel):
         input_b = self._state["input_b"]
         input_c = self._state["input_c"]
         input_d = self._state["input_d"]
+        invert = self._state["invert"]
         
         # Calculate outputs
         self._state["sum_output"] = input_a + input_b + input_c + input_d
+        if invert:
+            self._state["sum_output"] = -self._state["sum_output"]
     
     def reset(self) -> None:
         """Reset the model to its initial state."""
