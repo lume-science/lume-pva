@@ -99,3 +99,30 @@ Represented as **NTNDArray** with data representation matching the numpy shape a
 Supported metadata:
 * `timestamp`
 
+### `TorchScalarVariable`
+
+Represented as **NTScalar** with a `double` value field.
+
+Supported metadata:
+* `timestamp`
+
+### `TorchNDVariable`
+
+Represented as **NTNDArray** with data representation matching the Tensor shape and dtype.
+
+Supported metadata:
+* `timestamp`
+
+### `BoolVariable`
+
+Represented as **NTScalar** with a `bool` value field.
+
+Supported metadata:
+* `timestamp`
+
+### `StrVariable`
+
+Represented as **NTScalar** with a `str` value field.
+
+Supported metadata:
+* `timestamp`
