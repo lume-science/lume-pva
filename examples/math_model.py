@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from lume.model import LUMEModel
-from lume.variables import ScalarVariable
+from lume.variables import ScalarVariable, IntVariable, BoolVariable, StrVariable
 from typing import Any
 from lume_pva.runner import Runner
 from lume_pva.simulator import SimpleSimulator
@@ -20,7 +20,8 @@ class SimpleMathModel(LUMEModel):
             "input_a": 1.0,
             "input_b": 1.0,
             "input_c": 1.0,
-            "sum_output": 2.0
+            "input_d": 1,
+            "sum_output": 2.0,
         }
         # Current state (will be modified during simulation)
         self._state = self._initial_state.copy()
@@ -48,12 +49,19 @@ class SimpleMathModel(LUMEModel):
                 unit="dimensionless",
                 read_only=False
             ),
+            "input_d": IntVariable(
+                name="input_d", 
+                default_value=1,
+                value_range=(-10, 10),
+                unit="dimensionless",
+                read_only=False
+            ),
             "sum_output": ScalarVariable(
                 name="sum_output",
                 default_value=2.0,
                 unit="dimensionless", 
                 read_only=True  # This is computed, not set directly
-            ),
+            )
         }
     
     @property
@@ -99,9 +107,10 @@ class SimpleMathModel(LUMEModel):
         input_a = self._state["input_a"]
         input_b = self._state["input_b"]
         input_c = self._state["input_c"]
+        input_d = self._state["input_d"]
         
         # Calculate outputs
-        self._state["sum_output"] = input_a + input_b + input_c
+        self._state["sum_output"] = input_a + input_b + input_c + input_d
     
     def reset(self) -> None:
         """Reset the model to its initial state."""
@@ -138,6 +147,12 @@ if __name__ == '__main__':
                 'mode': 'expr',
                 'expr': '10*sin(0.325 * t)',
                 'rate': 0.09
+            },
+            'input_d': {
+                'type': 'float',
+                'mode': 'expr',
+                'expr': '10*t',
+                'rate': 1
             }
         })
 

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from lume.variables import Variable, ScalarVariable, NDVariable
+from lume.variables import Variable, ScalarVariable, NDVariable, BoolVariable, IntVariable, StrVariable
 from lume_torch.variables import TorchScalarVariable, TorchNDVariable
 from typing import Any, Dict
 from p4p import Type, Value
@@ -102,15 +102,23 @@ class ScalarVariableHandler(VariableHandler):
                 v['alarm']['status'] = int(epicsAlarmStatus.NO_STATUS)
 
 
-    def create_type(self, variable: ScalarVariable) -> Type:
-        return NTScalar.buildType('d', control=True, display=True)
+    def create_type(self, variable: ScalarVariable | IntVariable) -> Type:
+        return NTScalar.buildType(
+            'd' if isinstance(variable, ScalarVariable) else 'l',
+            control=True,
+            display=True
+        )
 
-    def pack_value(self, variable: ScalarVariable, type_: Type, value: ScalarType | None) -> Value:
+    def pack_value(self, variable: ScalarVariable | IntVariable, type_: Type, value: ScalarType | None) -> Value:
         if value is None: # Use default if not provided
             if variable.default_value is None:
                 value = 0
             else:
                 value = variable.default_value
+
+        # Force cast to int for int variables, otherwise we trip validation
+        if isinstance(variable, IntVariable):
+            value = int(value)
 
         if not isinstance(value, (float, int, np.floating)):
             raise ValueError(f'ScalarVariable {variable.name} expects float, int or np.floating, but got {type(value)}')
@@ -121,8 +129,11 @@ class ScalarVariableHandler(VariableHandler):
         self.set_metadata(variable, v, value)
         return v
 
-    def unpack_value(self, variable: ScalarVariable, value: Value) -> float:
-        return float(value['value'])
+    def unpack_value(self, variable: ScalarVariable | IntVariable, value: Value) -> float | int:
+        if isinstance(variable, IntVariable):
+            return int(value['value'])
+        else:
+            return float(value['value'])
 
 
 class NDVariableHandler(VariableHandler):
@@ -243,6 +254,7 @@ class TorchScalarVariableHandler(VariableHandler):
 def find_variable_handler(type) -> VariableHandler | None:
     VARIABLE_HANDLERS = {
         ScalarVariable: ScalarVariableHandler(),
+        IntVariable: ScalarVariableHandler(),
         NDVariable: NDVariableHandler(),
         TorchScalarVariable : TorchScalarVariableHandler(),
         TorchNDVariable: NDVariableHandler(),
