@@ -67,6 +67,23 @@ class VariableHandler(ABC):
             The unpacked value
         """
         raise NotImplementedError()
+    
+    def is_supported(self, variable: Variable) -> bool:
+        """
+        Checks if a variable can be supported by the handler.
+        Used to determine if the variable lives within the bounds of the handler, i.e. the variable's specific dtype being supported.
+
+        Parameters
+        ----------
+        variable : Variable
+            The variable. Must be a subclass of Variable
+        
+        Returns
+        -------
+        bool :
+            True if the variable can be handled by this handler
+        """
+        return True
 
 class ScalarVariableHandler(VariableHandler):
     """Variable handler for LUME ScalarVariable, and the TorchScalarVariable type"""
@@ -139,7 +156,7 @@ class ScalarVariableHandler(VariableHandler):
 class NDVariableHandler(VariableHandler):
     """Variable handler for LUME NDVariable type"""
 
-    def _typecode(self, variable: NDVariable) -> str:
+    def _typecode(self, variable: NDVariable | TorchNDVariable) -> str:
         match variable.dtype:
             case np.float64 | torch.float64:
                 return 'doubleValue'
@@ -166,9 +183,17 @@ class NDVariableHandler(VariableHandler):
             case np.str_:
                 return 'stringValue'
             case _:
-                raise TypeError(f'Unsupported numpy type {variable.dtype}')
+                raise TypeError(f'{variable.name}: Unsupported type "{variable.dtype.__class__}"')
 
-    def create_type(self, variable: NDVariable) -> Type:
+    def is_supported(self, variable: NDVariable | TorchNDVariable):
+        """Checks if the variable has a supported dtype"""
+        try:
+            self._typecode(variable)
+            return True
+        except:
+            return False
+
+    def create_type(self, variable: NDVariable | TorchNDVariable) -> Type:
         # NTNDArray (per the NT spec) does not support string[] as a value type. We'll deviate from the standard a bit here
         if variable.dtype in [np.str_]:
             extras = [

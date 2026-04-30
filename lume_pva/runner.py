@@ -174,6 +174,11 @@ class Runner:
                     continue # ParticleGroupVariable is a special case that doesn't have a handler
                 raise RuntimeError(f'Unknown type "{type(var)}"')
 
+            # Skip unsupported variable types
+            if not handler.is_supported(var):
+                LOG.warning(f'Unsupported variable "{var.name}". Skipping.')
+                continue
+
             # Cache handler and type for later
             self.pv_handlers[var.name] = handler
             self.types[var.name] = handler.create_type(var)
