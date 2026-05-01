@@ -5,7 +5,8 @@ from p4p.server.thread import SharedPV
 from p4p.client.thread import Subscription, Disconnected, RemoteError, Cancelled
 from p4p.nt import NTScalar
 from p4p import Value, Type
-from typing import Any, Dict, Callable, TypedDict
+from typing import Any, Dict, TypedDict
+from collections.abc import Callable
 from queue import Queue
 from enum import IntEnum
 from lume_pva.variables import VariableHandler, find_variable_handler
@@ -218,6 +219,7 @@ class Runner:
         model: LUMEModel,
         prefix: str = '',
         remote_inputs: bool = False,
+        name_transformer: Callable[[Variable, str], str] | None = None,
     ) -> RunnerConfig:
         """
         Generate a configuration for the specified model.
@@ -230,6 +232,8 @@ class Runner:
             PV name prefix
         remote_inputs : bool
             When true, model inputs (values not marked as rw) are configured as monitors for remote variables
+        name_transformer: Callable[[Variable, str], str] | None
+            A callable that transforms a variable's name into a new PV name. by default it just maps variable.name -> pv_name
 
         Returns
         -------
@@ -246,9 +250,13 @@ class Runner:
             mode = 'ro' if v.read_only else 'rw'
             if remote_inputs and not v.read_only:
                 mode = 'remote'
+            if name_transformer is not None:
+                pv = name_transformer(v, v.name)
+            else:
+                pv = k
             config['variables'][k] = {
                 'name': k,
-                'pv': k,
+                'pv': pv,
                 'mode': mode,
             }
         return config
