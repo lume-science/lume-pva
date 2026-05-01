@@ -93,7 +93,7 @@ class Runner:
                 op.done(error='Read only PV')
             else:
                 # Update PVs in simulator
-                self.runner.queue.put({self.variable.name: op.value()})
+                self.runner.queue.put({self.variable.name: {'value': op.value(), 'ts': time.time()}})
                 pv.post(op.value())
                 op.done()
 
@@ -353,14 +353,17 @@ class Runner:
         LOG.debug(f'Snapshot taken for PVs: {self.snapshot_pvs}')
         new_values = {}
         for pv in self.snapshot_pvs:
-            new_values[self.pv_to_var[pv]] = self.pvua_context.get(pv)
+            new_values[self.pv_to_var[pv]] = {
+                'value': self.pvua_context.get(pv),
+                'ts': time.time()
+            }
         self.queue.put(new_values)
 
     def _monitor_callback(self, pvname, value, **kwargs):
         """Callback from p4p monitor updates"""
-        self.queue.put({self.pv_to_var[pvname]: value})
+        self.queue.put({self.pv_to_var[pvname]: {'value': value, 'ts': time.time()}})
 
-    def _generate_value(self, pv: str, value: Any | None) -> Value:
+    def _generate_value(self, pv: str, value: Any | None, ts: float | None = None) -> Value:
         """
         Generates a new value for posting to the PV.
         Handles alarm updates, timestamp updates, and generating the value in the first place. This handles the
@@ -373,7 +376,7 @@ class Runner:
         )
 
         # Ensure timestamp is current
-        self._update_timestamp(v)
+        self._update_timestamp(v, ts=ts)
         return v
 
     def _update_timestamp(self, value: Value, ts=None) -> None:
@@ -411,7 +414,15 @@ class Runner:
                     timeo = 0
 
             new_values = {}
-            for k, v in up.items():
+            latest_ts = 0.0
+            for k, g in up.items():
+                v = g['value']
+                ts = g['ts']
+
+                # Record newest timestamp from the inputs
+                if ts > latest_ts:
+                    latest_ts = ts
+
                 # If needed, unpack value and add it to the new list of PVs
                 if isinstance(v, Value):
                     new_values[k] = self.pv_handlers[k].unpack_value(
@@ -420,6 +431,10 @@ class Runner:
                     )
                 else:
                     new_values[k] = v
+
+            # Use current time if we're missing a latest timestamp
+            if latest_ts <= 0:
+                latest_ts = time.time()
 
             # Set and simulate
             self.model.set(new_values)
@@ -438,7 +453,7 @@ class Runner:
                 try:
                     self.pvs[k].post(
                         self._generate_value(
-                            k, v
+                            k, v, latest_ts
                         )
                     )
                 except KeyError:
