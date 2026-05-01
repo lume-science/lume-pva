@@ -274,7 +274,7 @@ class Runner:
                 runner=self,
                 read_only=ro
             ),
-            initial=self._generate_value(pv, None)
+            initial=self._generate_value(var.name, None)
         )
         self.pvs[var.name] = pvobj
         self.providers[f'{prefix}{pv}'] = pvobj
@@ -350,7 +350,7 @@ class Runner:
 
     def _monitor_callback(self, pvname, value, **kwargs):
         """Callback from p4p monitor updates"""
-        self.queue.put({pvname: value})
+        self.queue.put({self.pv_to_var[pvname]: value})
 
     def _generate_value(self, pv: str, value: Any | None) -> Value:
         """
