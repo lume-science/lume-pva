@@ -17,6 +17,8 @@ import p4p.client.thread
 import p4p.nt
 import logging
 import pvua
+import sys
+import socket
 
 LOG = logging.getLogger('LumePva')
 
@@ -132,6 +134,7 @@ class Runner:
         self.providers = {} # Just for renaming
         self.snapshot_pvs = []
         self.pv_to_var = {} # Map pv name -> variable name
+        self.var_to_pv = {}
         self.pvua_context = pvua.Context()
 
         # Generate default config
@@ -185,6 +188,7 @@ class Runner:
             self.types[var.name] = handler.create_type(var)
 
             self.pv_to_var[pv] = var.name
+            self.var_to_pv[var.name] = pv
 
             if c['mode'] in ['ro', 'rw']:
                 # Generate a PV to be served
@@ -242,6 +246,7 @@ class Runner:
             passing to the Runner() constructor.
         """
         config = {
+            'description': '',
             'remote_model_mode': 'continuous',
             'prefix': prefix,
             'variables': {}
@@ -304,30 +309,37 @@ class Runner:
 
         self.types[pv] = Type([
             ('class', 's'),
-            ('variables', ('aS', None, [
+            ('description', 's'),
+            ('supported_variables', ('aS', None, [
                 ('name', 's'),
-                ('read_only', '?'),
                 ('pvname', 's'),
+                ('type', 's'),
+                ('read_only', '?'),
+                ('mode', 's')
             ]))
         ])
 
         val = Value(self.types[pv])
-        val['class'] = str(type(self.model))
+        val['class'] = self.model.__class__.__name__
+        val['description'] = self.config['description']
 
         vars = []
         for k, v in self.model.supported_variables.items():
             info = {
                 'name': v.name,
                 'read_only': v.read_only,
-                'pvname': self.config['variables'][k]['pv']
+                'pvname': self.config['variables'][k]['pv'],
+                'type': v.__class__.__name__,
+                'mode': self.config['variables'][k]['mode']
             }
             vars.append(info)
 
-        val['variables'] = vars
+        val['supported_variables'] = vars
 
         self.pvs[pv] = SharedPV(
             initial=val
         )
+        self.providers[f'{self.config["prefix"]}{pv}'] = self.pvs[pv]
 
     def _create_control_pvs(self):
         """Create any required control PVs"""

@@ -175,6 +175,8 @@ if __name__ == '__main__':
     model = SimpleMathModel()
     config = Runner.generate_config(model)
 
+    config['description'] = 'Simple math model demonstrating a number of variable types'
+
     config['update_rate'] = 1 # Update once per second
     config['remote_model_mode'] = 'continuous' if args.mode == 'remote' else 'snapshot'
 
