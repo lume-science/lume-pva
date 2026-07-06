@@ -537,7 +537,7 @@ class Runner:
         Dequeues PV updates from the updater thread, sets values on the model, and updates outputs.
         """
         LOG.info("starting EPICS server loop")
-        
+
         while True:
             # Wait for new data to come in
             item = self.queue.get()
