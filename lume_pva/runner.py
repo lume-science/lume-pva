@@ -536,6 +536,8 @@ class Runner:
         Runs the simulation, blocks forever.
         Dequeues PV updates from the updater thread, sets values on the model, and updates outputs.
         """
+        LOG.info("starting EPICS server loop")
+        
         while True:
             # Wait for new data to come in
             item = self.queue.get()
@@ -579,7 +581,7 @@ class Runner:
             sim_error = None
             try:
                 set_start = time.perf_counter()
-                LOG.debug(f"Setting model with new values: {new_values}")
+                LOG.info(f"Setting model with new values: {new_values}")
                 self.model.set(new_values)
                 LOG.debug(f"Model set() took {(time.perf_counter() - set_start) * 1000.0:.3f} ms")
 
