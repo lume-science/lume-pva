@@ -213,6 +213,10 @@ class Runner:
         self.ca_server: pcaspy.SimpleServer | None = None
         self.ca_driver: Runner.CaDriver | None = None
 
+        self.protos = config.get("protocol", ["ca", "pva"])
+        self.supports_ca = "ca" in self.protos
+        self.supports_pva = "pva" in self.protos
+
         # Cache for previous state, value per name
         self._cached_state: dict[str, Any] = {}
 
@@ -228,6 +232,9 @@ class Runner:
             )
 
         self.update_rate = config.get("update_rate", 0.1)
+
+        # Configure CA environment
+        os.environ["EPICS_CA_MAX_ARRAY_BYTES"] = self.config.get("max_array_bytes", 80000000)
 
         # Setup PVs
         for c in self.config["variables"].values():
@@ -294,7 +301,9 @@ class Runner:
                 )
 
         # Create an informational PV (i.e. including list of variables, etc.)
-        self._create_model_info()
+        # Only supported for PVA since it uses structures
+        if self.supports_pva:
+            self._create_model_info()
 
         # Create additional control PVs
         self._create_control_pvs()
@@ -304,7 +313,6 @@ class Runner:
 
         # Start the CA server under the shared async context
         if len(self.pvdb.keys()) > 0:
-            os.environ["EPICS_CA_MAX_ARRAY_BYTES"] = str(self.config["max_array_bytes"])
             self.ca_server = pcaspy.SimpleServer()
             self.ca_server.createPV(self.config.get("prefix", ""), self.pvdb)
             self.ca_driver = Runner.CaDriver(self)
@@ -419,9 +427,7 @@ class Runner:
         handler : VariableHandler
             The variable handler for this variable type
         """
-        protos = self.config.get("protocol", ["ca", "pva"])
-
-        if "pva" in protos:
+        if self.supports_pva:
             LOG.debug(f"Creating PVA PV: pv={pv}")
             pvobj = SharedPV(
                 handler=Runner.Handler(variable=var, runner=self, read_only=ro),
@@ -430,7 +436,7 @@ class Runner:
             self.pvs[var.name] = pvobj
             self.providers[f"{prefix}{pv}"] = pvobj
 
-        if "ca" in protos:
+        if self.supports_ca:
             # Generate a default value suitable for pcaspy
             default_value = handler.default_value(var, flatten=True, native_python=True)
 
@@ -455,13 +461,31 @@ class Runner:
         return True
 
     def _create_model_info(self):
-        """Creates a model info PV"""
+        """Creates a model info PV for PVA"""
         pv = "model_info"
+
+        envs = [
+            "EPICS_CA_ADDR_LIST",
+            "EPICS_CA_AUTO_ADDR_LIST",
+            "EPICS_CA_SERVER_PORT",
+            "EPICS_CA_CONN_TMO",
+            "EPICS_CA_MAX_ARRAY_BYTES",
+            "EPICS_CA_REPEATER_PORT",
+            "EPICS_PVA_ADDR_LIST",
+            "EPICS_PVA_AUTO_ADDR_LIST",
+            "EPICS_PVA_SERVER_PORT",
+            "EPICS_PVA_CONN_TMO",
+            "EPICS_PVA_BROADCAST_PORT",
+        ]
 
         self.types[pv] = Type(
             [
                 ("class", "s"),
                 ("description", "s"),
+                (
+                    "env",
+                    ("S", None, [(x, "s") for x in envs]),
+                ),
                 (
                     "supported_variables",
                     (
@@ -482,6 +506,9 @@ class Runner:
         val = Value(self.types[pv])
         val["class"] = self.model.__class__.__name__
         val["description"] = self.config["description"]
+
+        for e in envs:
+            val["env"][e] = os.environ.get(e, "")
 
         vars = []
         for k, v in self.model.supported_variables.items():
