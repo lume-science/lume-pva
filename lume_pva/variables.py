@@ -180,7 +180,7 @@ class VariableHandler(ABC, Generic[VariableT]):
         """
         Performs fixups for the specified value so pcaspy can understand it. For most variable types, this function
         won't need to do anything (default impl is fine). For variable types dealing with Numpy or Tensor types, this
-        function will need to convert to the appropriate native Python type
+        function will need to convert to the appropriate native Python type.
 
         Parameters
         ----------
