@@ -334,6 +334,119 @@ def test_default_array_value_passthrough(
 
 
 @pytest.mark.parametrize(
+    ("variable", "expected_default"),
+    [
+        pytest.param(ScalarVariable(name="scalar", default_value=5.0), 5.0, id="scalar"),
+        pytest.param(IntVariable(name="int", default_value=2), 2, id="int"),
+        pytest.param(BoolVariable(name="bool", default_value=True), True, id="bool"),
+        pytest.param(StrVariable(name="str", default_value="hi"), "hi", id="str"),
+        pytest.param(
+            EnumVariable(name="enum", options=["A", "B", "C"], default_value="B"),
+            "B",
+            id="enum",
+        ),
+        pytest.param(
+            TorchScalarVariable(name="torchscalar", default_value=1.0), 1.0, id="torchscalar"
+        ),
+    ],
+)
+def test_default_value_method_scalar_like(
+    variable: Variable,
+    expected_default: Any,
+) -> None:
+    handler = find_variable_handler(type(variable))
+    assert handler is not None
+
+    assert handler.default_value(variable) == expected_default
+
+
+@pytest.mark.parametrize(
+    ("variable", "expected_default"),
+    [
+        pytest.param(
+            NDVariable(
+                name="nd",
+                shape=(2, 3),
+                dtype=np.int64,
+                default_value=np.array(((1, 2, 3), (4, 5, 6))),
+            ),
+            np.array(((1, 2, 3), (4, 5, 6))),
+            id="nd",
+        ),
+        pytest.param(
+            TorchNDVariable(
+                name="ndtorch",
+                shape=(2, 3),
+                dtype=torch.int64,
+                default_value=torch.tensor(np.array(((1, 2, 3), (4, 5, 6)))),
+            ),
+            torch.tensor(np.array(((1, 2, 3), (4, 5, 6)))),
+            id="torchnd",
+        ),
+    ],
+)
+def test_default_value_method_array_like(
+    variable: Variable,
+    expected_default: Any,
+) -> None:
+    handler = find_variable_handler(type(variable))
+    assert handler is not None
+
+    actual = handler.default_value(variable)
+    bool_mask = actual == expected_default
+    assert bool_mask.all()
+
+
+@pytest.mark.parametrize(
+    "variable",
+    [
+        pytest.param(ScalarVariable(name="scalar", default_value=5.0), id="scalar"),
+        pytest.param(IntVariable(name="int", default_value=2), id="int"),
+        pytest.param(BoolVariable(name="bool", default_value=True), id="bool"),
+        pytest.param(StrVariable(name="str", default_value="hi"), id="str"),
+        pytest.param(
+            EnumVariable(name="enum", options=["A", "B", "C"], default_value="B"),
+            id="enum",
+        ),
+        pytest.param(TorchScalarVariable(name="torchscalar", default_value=1.0), id="torchscalar"),
+        pytest.param(
+            NDVariable(
+                name="nd",
+                shape=(2, 3),
+                dtype=np.int64,
+                default_value=np.array(((1, 2, 3), (4, 5, 6))),
+            ),
+            id="nd",
+        ),
+        pytest.param(
+            TorchNDVariable(
+                name="ndtorch",
+                shape=(2, 3),
+                dtype=torch.int64,
+                default_value=torch.tensor(np.array(((1, 2, 3), (4, 5, 6)))),
+            ),
+            id="torchnd",
+        ),
+    ],
+)
+def test_pack_value_none_matches_default_value(variable: Variable) -> None:
+    handler = find_variable_handler(type(variable))
+    assert handler is not None
+
+    type_ = handler.create_type(variable)
+    packed = handler.pack_value(variable, type_, None)
+    unpacked = handler.unpack_value(variable, packed)
+    expected = handler.default_value(variable)
+
+    if isinstance(expected, np.ndarray):
+        np.testing.assert_array_equal(unpacked, expected)
+    elif isinstance(expected, torch.Tensor):
+        torch.testing.assert_close(unpacked, expected)
+    else:
+        assert unpacked == expected
+
+
+@pytest.mark.parametrize(
     ("variable"),
     [
         pytest.param(

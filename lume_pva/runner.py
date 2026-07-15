@@ -716,6 +716,14 @@ class Runner:
                     if k in self.subs:
                         continue
 
+                    # The model may return None for an output; there is nothing
+                    # meaningful to post, and passing it downstream would either
+                    # silently substitute the variable default (PVA path) or raise
+                    # in value_to_native (CA path). Skip and warn instead.
+                    if v is None:
+                        LOG.warning(f"Model returned None for output '{k}'; skipping update")
+                        continue
+
                     # Update PVA component
                     pv = self.pvs.get(k)
                     if pv is not None:
