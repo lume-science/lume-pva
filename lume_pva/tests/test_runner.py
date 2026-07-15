@@ -91,6 +91,8 @@ def _make_runner_control_stub(protocol: list[str]) -> Runner:
     runner.pvdb = {}
     runner.snapshot_control_pv = ""
     runner.reset_control_pv = ""
+    runner.supports_pva = "pva" in protocol
+    runner.supports_ca = "ca" in protocol
 
     # _create_control_pvs wires callbacks to these methods; simple stubs are enough.
     runner.take_snapshot = lambda: None
