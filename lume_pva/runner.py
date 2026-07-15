@@ -213,10 +213,6 @@ class Runner:
         self.ca_server: pcaspy.SimpleServer | None = None
         self.ca_driver: Runner.CaDriver | None = None
 
-        self.protos = config.get("protocol", ["ca", "pva"])
-        self.supports_ca = "ca" in self.protos
-        self.supports_pva = "pva" in self.protos
-
         # Cache for previous state, value per name
         self._cached_state: dict[str, Any] = {}
 
@@ -224,6 +220,11 @@ class Runner:
         if config is None:
             config = self.generate_config(model, prefix)
         self._config = config
+
+        # Grab list of supported protocols
+        self.protos = self._config.get("protocol", ["ca", "pva"])
+        self.supports_ca = "ca" in self.protos
+        self.supports_pva = "pva" in self.protos
 
         # Validate some configuration options
         if config.get("remote_model_mode", DEFAULT_MODEL_MODE) not in VALID_MODEL_MODES:
@@ -528,8 +529,6 @@ class Runner:
 
     def _create_control_pvs(self):
         """Create any required control PVs"""
-        protos = self.config.get("protocol", ["ca", "pva"])
-
         # Create a snapshot PV and a reset PV. These are used to trigger a snapshot of remote PVs, and to reset the model.
         snapshot_pvname = f"{self.config['prefix']}SNAPSHOT"
         self.snapshot_control_pv = snapshot_pvname
@@ -538,7 +537,7 @@ class Runner:
         self.reset_control_pv = reset_pvname
 
         # Create PVA shared PVs for snapshot and reset if PVA is enabled
-        if "pva" in protos:
+        if self.supports_pva:
             if snapshot_pvname in self.providers:
                 raise RuntimeError(
                     f"Fatal name conflict: {snapshot_pvname} for the snapshot PV already exists!"
@@ -567,7 +566,7 @@ class Runner:
                 op.done()
 
         # Create CA PVs for snapshot and reset if CA is enabled
-        if "ca" in protos:
+        if self.supports_ca:
             if snapshot_pvname in self.pvdb:
                 raise RuntimeError(
                     f"Fatal name conflict: {snapshot_pvname} for the CA snapshot PV already exists!"
