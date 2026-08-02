@@ -304,6 +304,9 @@ conda activate lume-pva
 # Install EPICS command-line tools (pvget, caget, etc.)
 conda install -c conda-forge epics-base -y
 
+# Install PVXS tools (modern PVA CLI with TCP name server support)
+conda install -c conda-forge pvxs -y
+
 # Install lume-pva with development dependencies
 cd ~/controls/lume-pva/lume-pva-src
 pip install -e ".[dev]"
@@ -1941,4 +1944,231 @@ tmux new-session -s gauss-ml
 | CUDA out of memory (during training) | Reduce `BATCH_SIZE` or `NUM_SAMPLES` |
 | Inference works but values are wrong | `.pt` file was trained with different simulator params — retrain |
 ```
+
+---
+
+# Part 7: TCP Name Servers and PVXS Tools
+
+## Why This Matters
+
+In production environments (Kubernetes, SSH tunnels, firewalls), UDP broadcast/multicast doesn't work. EPICS supports **TCP-based name resolution** as an alternative — clients connect directly to server TCP ports for PV search instead of relying on UDP discovery.
+
+This is the standard connectivity pattern at SLAC for services running in S3DF Kubernetes pods that need to be reachable by external EPICS clients.
+
+---
+
+## Install PVXS Command-Line Tools
+
+The `pvget`/`pvput`/`pvmonitor` tools from conda's `epics-base` package use the older pvAccessCPP implementation, which does **NOT** support `EPICS_PVA_NAME_SERVERS`. You need the PVXS-based tools:
+
+```bash
+conda install -c conda-forge pvxs -y
+```
+
+This provides:
+
+| Tool | Purpose | Replaces |
+|------|---------|----------|
+| `pvxget` | Read PVs (PVA) | `pvget` |
+| `pvxput` | Write PVs (PVA) | `pvput` |
+| `pvxmonitor` | Monitor PVs (PVA) | `pvmonitor` |
+| `pvxinfo` | PV info/metadata (PVA) | `pvinfo` |
+
+### Verify installation:
+
+```bash
+pvxget -V
+# Expected: PVXS 1.5.2 (or later)
+```
+
+### Benefits of pvxget over pvget:
+
+| Feature | pvget (pvAccessCPP 7.1.7) | pvxget (PVXS 1.5.2) |
+|---------|---------------------------|----------------------|
+| `EPICS_PVA_NAME_SERVERS` | ❌ Not supported | ✅ Supported |
+| Display units | Not shown | ✅ Shows `display.units` |
+| Alarm info | Not shown | ✅ Shows `alarm.severity` |
+| Control limits | Not shown | ✅ Shows `control.limitLow/High` |
+| Value validation errors | Generic | ✅ Shows specific rejection reason |
+
+### Example: richer output from pvxget
+
+```bash
+$ pvxget input_a
+input_a
+   value double = 9
+   alarm.severity int32_t = 0
+   alarm.status int32_t = 0
+   display.limitLow double = -10
+   display.limitHigh double = 10
+   display.units string = "dimensionless"
+   control.limitLow double = -10
+   control.limitHigh double = 10
+```
+
+---
+
+## TCP Name Server Support Matrix
+
+| Tool | Protocol | TCP Name Servers | Status |
+|------|----------|-----------------|--------|
+| `pvxget` / `pvxput` / `pvxmonitor` (PVXS) | PVA | `EPICS_PVA_NAME_SERVERS` | ✅ Works |
+| `p4p` Python client | PVA | `EPICS_PVA_NAME_SERVERS` | ✅ Works |
+| `pvget` / `pvput` / `pvmonitor` (pvAccessCPP) | PVA | `EPICS_PVA_NAME_SERVERS` | ❌ Ignored |
+| `caget` / `caput` / `camonitor` (epics-base) | CA | `EPICS_CA_NAME_SERVERS` | ✅ Works |
+
+---
+
+## Testing TCP Name Servers Locally
+
+### Step 1: Identify server ports
+
+```bash
+# Find PVA ports (bound to *:PORT)
+ss -tlnp | grep python | grep "\*:"
+
+# Find CA ports (bound to 0.0.0.0:PORT)
+ss -tlnp | grep python | grep "0.0.0.0:"
+```
+
+### Step 2: Test PVA with TCP name servers (pvxget)
+
+```bash
+# Disable UDP discovery entirely
+export EPICS_PVA_ADDR_LIST=""
+export EPICS_PVA_AUTO_ADDR_LIST=NO
+export EPICS_PVA_NAME_SERVERS="127.0.0.1:<pva_port1> 127.0.0.1:<pva_port2>"
+
+# Use pvxget (PVXS) — works
+pvxget SIM:mean
+pvxget est_mean
+
+# NOTE: pvget (pvAccessCPP) will NOT work — it ignores EPICS_PVA_NAME_SERVERS
+```
+
+### Step 3: Test PVA with TCP name servers (Python p4p)
+
+```bash
+export EPICS_PVA_ADDR_LIST=""
+export EPICS_PVA_AUTO_ADDR_LIST=NO
+export EPICS_PVA_NAME_SERVERS="127.0.0.1:<pva_port1> 127.0.0.1:<pva_port2>"
+
+python -c "
+from p4p.client.thread import Context
+ctx = Context('pva')
+print(ctx.get('SIM:mean'))
+print(ctx.get('est_mean'))
+ctx.close()
+"
+```
+
+### Step 4: Test CA with TCP name servers (caget)
+
+```bash
+# Disable UDP discovery entirely
+export EPICS_CA_ADDR_LIST=""
+export EPICS_CA_AUTO_ADDR_LIST=NO
+export EPICS_CA_NAME_SERVERS="127.0.0.1:<ca_port1> 127.0.0.1:<ca_port2>"
+
+# caget works with TCP name servers
+caget sum_output
+caget est_mean
+caget ml_est_mean
+```
+
+---
+
+## Tested Example (Real Session)
+
+With all servers running on lepton:
+
+```bash
+# PVA via TCP (using pvxget)
+export EPICS_PVA_ADDR_LIST=""
+export EPICS_PVA_AUTO_ADDR_LIST=NO
+export EPICS_PVA_NAME_SERVERS="127.0.0.1:42501 127.0.0.1:44725"
+
+pvxget SIM:mean    # → from simulator (port 42501) ✅
+pvxget est_mean    # → from denoiser (port 44725) ✅
+
+# CA via TCP (using caget)
+export EPICS_CA_ADDR_LIST=""
+export EPICS_CA_AUTO_ADDR_LIST=NO
+export EPICS_CA_NAME_SERVERS="127.0.0.1:5064 127.0.0.1:44485 127.0.0.1:46477 127.0.0.1:43667"
+
+caget sum_output   # → from math_model (port 5064) ✅
+caget fft_real     # → from fft_model (port 44485) ✅
+caget est_mean     # → from gaussian_classical (port 46477) ✅
+caget ml_est_mean  # → from gaussian_ml (port 43667) ✅
+```
+
+All servers responded successfully via TCP-only discovery — zero UDP traffic.
+
+---
+
+## Ephemeral Ports: The Caveat
+
+Ports change every time a server restarts:
+
+```
+First start:  gaussian_sim → PVA port 42501
+After restart: gaussian_sim → PVA port 39872  ← DIFFERENT!
+```
+
+This means `EPICS_PVA_NAME_SERVERS` values become stale after a restart. Solutions:
+
+| Approach | How | When to use |
+|----------|-----|-------------|
+| UDP discovery | `EPICS_PVA_ADDR_LIST=127.0.0.1` | Local dev (default) |
+| Fixed ports | Configure each server to bind specific ports | Repeatable testing |
+| PVA Gateway | One stable endpoint, backends register | Production (K8s) |
+| Dynamic lookup | `ss -tlnp` after startup, update env | Ad-hoc testing |
+
+---
+
+## Recommended Practice
+
+| Scenario | Configuration |
+|----------|--------------|
+| Local laptop development | `EPICS_PVA_ADDR_LIST=127.0.0.1` + `AUTO=NO` (UDP on loopback) |
+| Testing TCP name servers | `EPICS_PVA_NAME_SERVERS="..."` + empty ADDR_LIST + `AUTO=NO` |
+| Production / K8s | `EPICS_PVA_NAME_SERVERS="gateway:5075"` + empty ADDR_LIST + `AUTO=NO` |
+| Lab network (multiple subnets) | `EPICS_PVA_ADDR_LIST="subnet1.255 subnet2.255"` + `AUTO=NO` |
+
+---
+
+## Input Validation (Demonstrated with pvxput)
+
+The PVXS tools show clear rejection messages when writing invalid values:
+
+```bash
+$ pvxput input_a 50.0
+ERROR: Value (50.0) of 'input_a' is out of valid range: ([-10.0,10.0]).
+
+$ pvxget input_a
+input_a
+   value double = 9           ← unchanged, write was rejected
+   alarm.severity int32_t = 0
+   control.limitLow double = -10
+   control.limitHigh double = 10
+```
+
+The Runner validates every incoming write against `value_range` and rejects values outside it. The model never sees invalid data. This works identically for both CA and PVA writes.
+
+---
+
+## Reset to Normal After TCP Testing
+
+```bash
+export EPICS_CA_ADDR_LIST=127.0.0.1
+export EPICS_CA_AUTO_ADDR_LIST=NO
+unset EPICS_CA_NAME_SERVERS
+
+export EPICS_PVA_ADDR_LIST=127.0.0.1
+export EPICS_PVA_AUTO_ADDR_LIST=NO
+unset EPICS_PVA_NAME_SERVERS
+```
+
+
+
 
