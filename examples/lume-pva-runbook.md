@@ -2169,6 +2169,93 @@ export EPICS_PVA_AUTO_ADDR_LIST=NO
 unset EPICS_PVA_NAME_SERVERS
 ```
 
+---
+
+# Part 8: Snapshot Mode
+
+## What is Snapshot Mode?
+
+In **continuous mode** (the default), the Runner subscribes to remote PVs with monitors and re-evaluates the model every time an input changes.
+
+In **snapshot mode**, the Runner does NOT subscribe. Remote inputs are only fetched when you explicitly write to the `SNAPSHOT` control PV. The model evaluates once per snapshot.
+
+```
+CONTINUOUS MODE (default):
+  Simulator posts new data every 0.5s
+  → Runner receives monitor callback
+  → Model re-evaluates automatically
+  → Outputs update every 0.5s
+
+SNAPSHOT MODE:
+  Simulator posts new data every 0.5s
+  → Runner ignores it (no monitors)
+  → Nothing happens...
+  → Client writes: pvxput SNAPSHOT 1
+  → Runner fetches current remote PV values (one-shot)
+  → Model evaluates ONCE
+  → Outputs update ONCE
+  → Nothing happens until next SNAPSHOT poke
+```
+
+## When to Use Snapshot Mode
+
+| Scenario | Use |
+|----------|-----|
+| Model is cheap, data streams continuously | Continuous mode |
+| Model is expensive (ML inference, 30+ seconds) | Snapshot mode |
+| You want to control exactly when evaluation happens | Snapshot mode |
+| Feedback loop where timing matters | Snapshot mode |
+| Simple monitoring / display | Continuous mode |
+
+## Testing Snapshot Mode
+
+```bash
+# Start math_model in snapshot mode
+python examples/math_model.py --mode snapshot
+
+# From client:
+pvxget sum_output       # → 4 (defaults, no remote data fetched yet)
+pvxput SNAPSHOT 1       # Trigger one-shot fetch + evaluate
+pvxget sum_output       # → new value computed from fetched inputs
+pvxput SNAPSHOT 1       # Trigger again for fresh values
+pvxget sum_output       # → updated
+```
+
+## Tested Results
+
+```
+Before snapshot:  sum_output = 4.0 (default 1+1+1+1)
+After snapshot:   sum_output = -57.4739 (fetched remote inputs, computed)
+```
+
+## Known Issue: SNAPSHOT PV Name Collision
+
+When multiple servers run without prefixes, they ALL serve a PV named `SNAPSHOT`:
+
+```
+$ pvxput SNAPSHOT 1
+ERR pvxs.client.dup Duplicate PV name SNAPSHOT from 127.0.0.1:34775 and 127.0.0.1:44725
+ERR pvxs.client.dup Duplicate PV name SNAPSHOT from 127.0.0.1:34775 and 127.0.0.1:45757
+ERR pvxs.client.dup Duplicate PV name SNAPSHOT from 127.0.0.1:34775 and 127.0.0.1:37485
+```
+
+The client detects the collision but picks one arbitrarily. This is another reason to **always use unique prefixes** in production:
+
+```python
+config["prefix"] = "MATH:"      # → MATH:SNAPSHOT
+config["prefix"] = "DENOISE:"   # → DENOISE:SNAPSHOT
+```
+
+## Configuration
+
+```python
+# In your model's main block:
+config = Runner.generate_config(model, prefix="")
+config["remote_model_mode"] = "snapshot"   # ← This is the key setting
+# "continuous" = auto-evaluate on input change (default)
+# "snapshot"   = only evaluate when SNAPSHOT PV is poked
+```
+
 
 
 
