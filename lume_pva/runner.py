@@ -4,6 +4,7 @@ import os
 import threading
 import time
 from collections.abc import Callable
+from enum import Enum, IntEnum
 from queue import Empty, Queue
 from typing import Any, TypedDict
 
@@ -13,10 +14,10 @@ import pcaspy
 import pcaspy.cas
 import pvua
 from lume.model import LUMEModel, Variable
-from lume.variables import ParticleGroupVariable
+from lume.variables import ConfigEnum, ParticleGroupVariable
 from p4p import Type, Value
 from p4p.client.thread import Subscription
-from p4p.nt import NTScalar
+from p4p.nt import NTEnum, NTScalar
 from p4p.server import ServerOperation
 from p4p.server.thread import SharedPV
 
@@ -30,6 +31,16 @@ VALID_MODEL_MODES = ["continuous", "snapshot"]
 
 DEFAULT_MODEL_MODE = "continuous"
 DEFAULT_PV_MODE = "rw"
+
+
+class ModelState(IntEnum):
+    Idle = 0
+    Simulating = 1
+
+
+class PutMode(str, Enum):
+    Immediate = "immediate"
+    Complete = "complete"
 
 
 class RunnerVariable(TypedDict):
@@ -69,12 +80,17 @@ class RunnerConfig(TypedDict):
         List of model variables
     protocol : list[str]
         List of supported protocols
+    put_mode : PutMode
+        Determines the behavior of put requests.
+        'immediate' (PutMode.Immediate) will ACK the PUT request immediately after inserting into the queue.
+        'complete' (PutMode.Complete) will ACK the PUT request only after the model has finished simulating.
     """
 
     remote_model_mode: str
     prefix: str
     variables: dict[str, RunnerVariable]
     protocol: list[str]
+    put_mode: PutMode
 
 
 class Runner:
@@ -96,22 +112,44 @@ class Runner:
         model: LUMEModel
         variable: Variable
 
-        def __init__(self, variable: Variable, runner: "Runner", read_only: bool):
+        def __init__(
+            self,
+            variable: Variable,
+            handler: VariableHandler,
+            runner: "Runner",
+            read_only: bool,
+            put_mode: PutMode,
+        ):
             self.model = runner.model
             self.variable = variable
             self.runner = runner
             self.ro = read_only
+            self.handler = handler
+            self.put_mode = put_mode
 
         def put(self, pv: SharedPV, op: ServerOperation):
             if self.ro:
                 op.done(error="Read only PV")
             else:
+                # Validate values and reject bad values immediately
+                try:
+                    self.variable.validate_value(
+                        self.handler.unpack_value(self.variable, op.value()),
+                        config=ConfigEnum.ERROR,
+                    )
+                except Exception as e:
+                    LOG.warning(f"{self.variable.name}: Rejected invalid value: {e!s}")
+                    op.done(error=str(e))
+                    return
+
                 # Update PVs in simulator
                 self.runner._enqueue(
                     {self.variable.name: {"value": op.value(), "ts": time.time()}},
                     done=lambda error: op.done(error=error),
                 )
                 pv.post(op.value())
+                if self.put_mode == PutMode.Immediate:
+                    op.done()
                 LOG.debug(f"Setting PVA: {self.variable.name} -> {op.value()}")
 
         def rpc(self, op: ServerOperation):
@@ -166,10 +204,22 @@ class Runner:
                 self.setParam(reason, value)
                 self.callbackPV(reason)
 
+            # Validate values before updating the model
+            try:
+                var.validate_value(nv, ConfigEnum.ERROR)
+            except Exception as e:
+                # Doesn't seem to be a way to reject CA updates with an error message.
+                LOG.warning(f"{reason}: Rejected invalid value: {e!s}")
+                self.callbackPV(reason)
+                return False
+
             self.runner._enqueue(
                 {vn: {"value": nv, "ts": time.time()}},
                 done=lambda error: _complete_put(),
             )
+
+            if self.runner._put_mode() == PutMode.Immediate:
+                _complete_put()
             return True
 
     def __init__(
@@ -201,7 +251,7 @@ class Runner:
         self.types = {}
         self.subs = {}
         self.context = p4p.client.thread.Context()
-        self.providers = {}  # Just for renaming
+        self.providers: dict[str, SharedPV] = {}  # Just for renaming
         self.pvdb = {}  # For pcaspy
         self.snapshot_pvs = []
         self.pv_to_var: dict[str, str] = {}  # Map pv name -> variable name
@@ -337,6 +387,7 @@ class Runner:
         prefix: str = "",
         remote_inputs: bool = False,
         name_transformer: Callable[[Variable, str], str] | None = None,
+        put_mode: PutMode = PutMode.Immediate,
     ) -> RunnerConfig:
         """
         Generate a configuration for the specified model.
@@ -351,7 +402,11 @@ class Runner:
             When true, model inputs (values not marked as rw) are configured as monitors for remote variables
         name_transformer: Callable[[Variable, str], str] | None
             A callable that transforms a variable's name into a new PV name. by default it just maps variable.name -> pv_name
-
+        put_mode : PutMode
+            Determines the behavior of put requests.
+            'immediate' (PutMode.Immediate) will ACK the PUT request immediately after inserting into the queue.
+            'complete' (PutMode.Complete) will ACK the PUT request only after the model has finished simulating.
+            For PutComplete mode, client timeouts must be adjusted to account for model simulation time.
         Returns
         -------
         RunnerConfig :
@@ -363,6 +418,8 @@ class Runner:
             "remote_model_mode": "continuous",
             "prefix": prefix,
             "max_array_bytes": os.environ.get("EPICS_CA_MAX_ARRAY_BYTES", "80000000"),
+            "put_mode": put_mode,
+            "update_rate": 0.1,
             "variables": {},
         }
         for k, v in model.supported_variables.items():
@@ -431,7 +488,13 @@ class Runner:
         if self.supports_pva:
             LOG.debug(f"Creating PVA PV: pv={pv}")
             pvobj = SharedPV(
-                handler=Runner.Handler(variable=var, runner=self, read_only=ro),
+                handler=Runner.Handler(
+                    variable=var,
+                    runner=self,
+                    read_only=ro,
+                    handler=handler,
+                    put_mode=self._put_mode(),
+                ),
                 initial=self._generate_value(var.name, None),
             )
             self.pvs[var.name] = pvobj
@@ -536,24 +599,23 @@ class Runner:
         reset_pvname = f"{self.config['prefix']}RESET"
         self.reset_control_pv = reset_pvname
 
+        status_control_pvname = f"{self.config['prefix']}STATUS"
+        self.status_control_pv = status_control_pvname
+
+        def conflict_check(x):
+            if x in self.pvdb or x in self.providers:
+                raise RuntimeError(f"Fatal name conflict: {x} already exists in the PV database!")
+
+        [conflict_check(x) for x in [snapshot_pvname, reset_pvname, status_control_pvname]]
+
         # Create PVA shared PVs for snapshot and reset if PVA is enabled
         if self.supports_pva:
-            if snapshot_pvname in self.providers:
-                raise RuntimeError(
-                    f"Fatal name conflict: {snapshot_pvname} for the snapshot PV already exists!"
-                )
-
             self.providers[snapshot_pvname] = SharedPV(initial=NTScalar("d").wrap(0))
 
             @self.providers[snapshot_pvname].put
             def onPut(pv, op):
                 self.take_snapshot()
                 op.done()
-
-            if reset_pvname in self.providers:
-                raise RuntimeError(
-                    f"Fatal name conflict: {reset_pvname} for the reset PV already exists!"
-                )
 
             self.providers[reset_pvname] = SharedPV(initial=NTScalar("i").wrap(0))
 
@@ -565,17 +627,19 @@ class Runner:
                 )
                 op.done()
 
+            self.status_control_pva_enum = NTEnum()
+            self.providers[status_control_pvname] = SharedPV(
+                initial=self.status_control_pva_enum.wrap(
+                    0, timestamp=time.time(), choices=list(ModelState.__members__.keys())
+                )
+            )
+
+            @self.providers[status_control_pvname].put
+            def onStatusPut(pv, op):
+                op.done(error="Read-only PV")
+
         # Create CA PVs for snapshot and reset if CA is enabled
         if self.supports_ca:
-            if snapshot_pvname in self.pvdb:
-                raise RuntimeError(
-                    f"Fatal name conflict: {snapshot_pvname} for the CA snapshot PV already exists!"
-                )
-            if reset_pvname in self.pvdb:
-                raise RuntimeError(
-                    f"Fatal name conflict: {reset_pvname} for the CA reset PV already exists!"
-                )
-
             self.pvdb[snapshot_pvname] = {
                 "type": "int",
                 "value": 0,
@@ -586,6 +650,7 @@ class Runner:
                 "value": 0,
                 "asyn": False,
             }
+            self.pvdb[status_control_pvname] = {"type": "enum", "enums": ["Idle", "Simulating"]}
 
         return None
 
@@ -653,10 +718,13 @@ class Runner:
                 try:
                     next_update = self.queue.get_nowait()
                     value_data.update(next_update["values"])
-                    done_callbacks.extend(next_update["done"])
+                    if next_update.get("done") is not None:
+                        done_callbacks.extend(next_update["done"])
                     reset_requested = reset_requested or next_update.get("reset", False)
                 except Empty:
                     pass
+
+            self._set_model_state(ModelState.Simulating)
 
             new_values = {}
             latest_ts = 0.0
@@ -715,10 +783,7 @@ class Runner:
                     if k in self.subs:
                         continue
 
-                    # The model may return None for an output; there is nothing
-                    # meaningful to post, and passing it downstream would either
-                    # silently substitute the variable default (PVA path) or raise
-                    # in value_to_native (CA path). Skip and warn instead.
+                    # The model my return None for an output. Let's reject those variable updates.
                     if v is None:
                         LOG.warning(f"Model returned None for output '{k}'; skipping update")
                         continue
@@ -756,12 +821,13 @@ class Runner:
                 LOG.error(f"Simulation Cycle Failed: ({sim_error}), resetting to cached value")
                 self._reset_to_cached_state()
             finally:
-                # With simulation compoleted, signal put completion to any waitihng clients
-                for cb in done_callbacks:
+                # With simulation completed, signal put completion to any waiting clients.
+                for cb in done_callbacks if self._put_mode() == PutMode.Complete else []:
                     try:
                         cb(sim_error)
                     except Exception as excp:
                         LOG.error(f"Error signalling put-completion: {excp}")
+                self._set_model_state(ModelState.Idle)
 
     def run(self):
         """
@@ -784,3 +850,18 @@ class Runner:
         """Save `state` to the cache"""
         LOG.debug(f"Caching model state: {state}")
         self._cached_state = state
+
+    def _put_mode(self) -> PutMode:
+        return self.config.get("put_mode", PutMode.Immediate)
+
+    def _set_model_state(self, state: ModelState):
+        """Updates the model state and related PVs"""
+        if (pv := self.providers.get(self.status_control_pv)) is not None:
+            pv.post(self.status_control_pva_enum.wrap(state, timestamp=time.time()))
+        if self.status_control_pv in self.pvdb.keys():
+            self.ca_driver.setParam(
+                self.status_control_pv,
+                state,
+                timestamp=pcaspy.cas.epicsTimeStamp.fromPosixTimeStamp(time.time()),
+            )
+            self.ca_driver.updatePV(self.status_control_pv)
