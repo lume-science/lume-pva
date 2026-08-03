@@ -13,6 +13,8 @@ from lume.variables import (
 from lume_pva.runner import Runner
 from lume_pva.simulator import SimpleSimulator
 
+from . import add_common_test_args
+
 
 class SimpleMathModel(LUMEModel):
     """
@@ -149,7 +151,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("-v", action="store_true", help="Enable verbose logging")
+    add_common_test_args(parser)
     parser.add_argument(
         "--mode",
         type=str,
@@ -191,7 +193,7 @@ if __name__ == "__main__":
         )
 
     model = SimpleMathModel()
-    config = Runner.generate_config(model)
+    config = Runner.generate_config(model, put_mode=args.put_mode)
 
     config["description"] = "Simple math model demonstrating a number of variable types"
 
