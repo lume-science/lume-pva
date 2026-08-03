@@ -37,6 +37,8 @@ import pytest
 from lume.exceptions import ReadOnlyError
 from lume.variables.variable import ConfigEnum, Variable
 
+from lume_pva.runner import PutMode
+
 # Keep all EPICS traffic on the loopback interface. Must be set before p4p,
 # pyepics, or the pcaspy server (created in Runner.__init__) initialise.
 os.environ.setdefault("EPICS_CA_ADDR_LIST", "127.0.0.1")
@@ -138,14 +140,16 @@ class GatedModel(LUMEModel):
         self._state = {"input_a": 0.0, "sum_output": 0.0}
 
 
-def _serve(release: mpEvent, entered: mpEvent, completed: mpEvent, ready: mpEvent) -> None:
+def _serve(
+    put_mode: PutMode, release: mpEvent, entered: mpEvent, completed: mpEvent, ready: mpEvent
+) -> None:
     """Child-process entry point: serve a gated model over CA and PVA.
 
     Must be importable at module top level so the ``spawn`` start method can
     locate it. Blocks forever once ready; the parent terminates the process.
     """
     model = GatedModel(release, entered, completed)
-    config = Runner.generate_config(model)
+    config = Runner.generate_config(model, put_mode=put_mode)
     # No batching delay -- the cycle is driven purely by the gate.
     config["update_rate"] = 0.0
 
@@ -172,10 +176,11 @@ class RunnerHandle:
     release: mpEvent
     entered: mpEvent
     completed: mpEvent
+    put_mode: PutMode
 
 
-@pytest.fixture(scope="function")
-def harness() -> Generator[RunnerHandle, None, None]:
+@pytest.fixture(scope="function", params=[PutMode.Complete, PutMode.Immediate])
+def harness(request) -> Generator[RunnerHandle, None, None]:
     """
     Run a Runner in a child process and yield the shared gate + a PVA client.
 
@@ -192,7 +197,7 @@ def harness() -> Generator[RunnerHandle, None, None]:
 
     proc = _MP.Process(
         target=_serve,
-        args=(release, entered, completed, ready),
+        args=(request.param, release, entered, completed, ready),
         daemon=True,
     )
     proc.start()
@@ -202,6 +207,7 @@ def harness() -> Generator[RunnerHandle, None, None]:
         release=release,
         entered=entered,
         completed=completed,
+        put_mode=request.param,
     )
     try:
         yield handle
@@ -221,7 +227,7 @@ def clear_harness(harness: RunnerHandle) -> None:
     harness.release.clear()
 
 
-def _assert_put_completion(harness: RunnerHandle, putter: Callable[[], None]) -> None:
+def _assert_put_mode(harness: RunnerHandle, putter: Callable[[], None]) -> None:
     """Run ``putter`` on a thread and assert it blocks until the sim completes.
 
     ``putter`` must perform a blocking, completion-aware put (PVA put, or
@@ -246,12 +252,20 @@ def _assert_put_completion(harness: RunnerHandle, putter: Callable[[], None]) ->
     # The value reached the runner and the simulation is now running...
     assert harness.entered.wait(timeout=OP_TIMEOUT), "simulation never started"
 
-    # ...so a completion-aware put must still be blocked. If this fires, the
-    # client was signalled before the simulation finished (put-completion bug).
-    assert not put_returned.wait(
-        timeout=BLOCK_WINDOW
-    ), "put reported completion before the simulation finished"
-    assert thread.is_alive()
+    if harness.put_mode == PutMode.Complete:
+        # ...so a completion-aware put must still be blocked. If this fires, the
+        # client was signalled before the simulation finished (put-completion bug).
+        assert not put_returned.wait(
+            timeout=BLOCK_WINDOW
+        ), "put reported completion before the simulation finished"
+        assert thread.is_alive()
+    elif harness.put_mode == PutMode.Immediate:
+        # Ensure the put returned immediately for immediate mode
+        assert put_returned.wait(
+            timeout=OP_TIMEOUT
+        ), "put reported completion after the simulation finished"
+    else:
+        assert False, "Invalid put mode"
 
     # Let the simulation finish; the put must now complete.
     harness.release.set()
@@ -263,18 +277,16 @@ def _assert_put_completion(harness: RunnerHandle, putter: Callable[[], None]) ->
 
 def test_pva_put_waits_for_simulation(harness: RunnerHandle) -> None:
     with Context("pva") as ctx:
-        _assert_put_completion(
-            harness, lambda: ctx.put("input_a", 5.0, timeout=OP_TIMEOUT, wait=True)
-        )
+        _assert_put_mode(harness, lambda: ctx.put("input_a", 5.0, timeout=OP_TIMEOUT, wait=True))
 
         assert harness.completed.is_set()
         assert float(ctx.get("sum_output", timeout=OP_TIMEOUT)) == pytest.approx(10.0)
 
 
 def test_ca_put_waits_for_simulation(harness: RunnerHandle) -> None:
-    # caput timeout needs to essentially run forever, to `_assert_put_completion` to check
+    # caput timeout needs to essentially run forever, to `_assert_put_mode` to check
     # if the thread has completed.
-    _assert_put_completion(
+    _assert_put_mode(
         harness, lambda: epics.caput("input_a", 7.0, wait=True, timeout=10 * OP_TIMEOUT)
     )
 
@@ -284,25 +296,26 @@ def test_ca_put_waits_for_simulation(harness: RunnerHandle) -> None:
 
 def test_standard_sim(harness: RunnerHandle):
     # attempt set out of bounds, no need to wait
+    harness.completed.clear()
     epics.caput("input_a", 10.0)
+    assert harness.completed.wait(timeout=OP_TIMEOUT)
 
     # assert model set has completed
-    assert harness.completed.is_set()
     assert float(epics.caget("sum_output", timeout=OP_TIMEOUT)) == pytest.approx(20.0)
     assert float(epics.caget("input_a", timeout=OP_TIMEOUT)) == pytest.approx(10.0)
 
 
 def test_failed_sim(harness: RunnerHandle):
-    assert harness.completed.is_set()
     # Assert initial state
     assert float(epics.caget("input_a", timeout=OP_TIMEOUT)) == pytest.approx(0.0)
     assert float(epics.caget("sum_output", timeout=OP_TIMEOUT)) == pytest.approx(0.0)
 
     # Reasonable input
+    harness.completed.clear()
     epics.caput("input_a", 4.2, wait=True)
+    assert harness.completed.wait(timeout=OP_TIMEOUT)
 
     # Verify record has processed
-    assert harness.completed.is_set()
     assert float(epics.caget("input_a", timeout=OP_TIMEOUT)) == pytest.approx(4.2)
     assert float(epics.caget("sum_output", timeout=OP_TIMEOUT)) == pytest.approx(8.4)
 
@@ -310,7 +323,6 @@ def test_failed_sim(harness: RunnerHandle):
     epics.caput("input_a", 7.0e6, wait=True)
 
     # reverting to previous (cached) value, runner is still operational
-    assert harness.completed.is_set()
     assert float(epics.caget("input_a", timeout=OP_TIMEOUT)) == pytest.approx(4.2)
     assert float(epics.caget("sum_output", timeout=OP_TIMEOUT)) == pytest.approx(8.4)
 
@@ -320,7 +332,10 @@ def test_pva_reset_calls_model_reset(harness: RunnerHandle) -> None:
     harness.release.set()
 
     with Context("pva") as ctx:
+        harness.completed.clear()
         ctx.put("input_a", 5.0, timeout=OP_TIMEOUT, wait=True)
+        assert harness.completed.wait(timeout=OP_TIMEOUT)
+
         assert float(ctx.get("input_a", timeout=OP_TIMEOUT)) == pytest.approx(5.0)
         assert float(ctx.get("sum_output", timeout=OP_TIMEOUT)) == pytest.approx(10.0)
 
