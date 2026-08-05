@@ -13,3 +13,10 @@ def add_common_test_args(parser: argparse.ArgumentParser):
         default=PutMode.Immediate.value,
         help="Put mode to use. 'immediate' acks put requests immediately and 'complete' acks them only after the model has finished simulating.",
     )
+    parser.add_argument(
+        "--pv-prefix",
+        dest="pv_prefix",
+        default="example:",
+        type=str,
+        help="Add this prefix to all PVs added by the model",
+    )

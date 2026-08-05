@@ -185,16 +185,19 @@ if __name__ == "__main__":
                 "rate": 0.1,
                 "nvalues": 1024,
             },
-        }
+        },
+        prefix=args.pv_prefix,
     )
 
     model = FFTModel()
-    config = Runner.generate_config(model, put_mode=args.put_mode)
+    config = Runner.generate_config(model, put_mode=args.put_mode, prefix=args.pv_prefix)
 
     config["remote_model_mode"] = "continuous"
 
     for k in ["signal_a", "signal_b", "signal_c"]:
-        config["variables"][k]["mode"] = "remote"
+        v = config["variables"][k]
+        v["mode"] = "remote"
+        v["pv"] = f"{args.pv_prefix}{v['pv']}"  # Remap name with prefix
 
     runner = Runner(model=model, config=config)
     runner.run()

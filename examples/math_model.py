@@ -189,11 +189,12 @@ if __name__ == "__main__":
                     "rate": 0.09,
                 },
                 "input_d": {"type": "float", "mode": "expr", "expr": "10*t", "rate": 1},
-            }
+            },
+            prefix=args.pv_prefix,
         )
 
     model = SimpleMathModel()
-    config = Runner.generate_config(model, put_mode=args.put_mode)
+    config = Runner.generate_config(model, put_mode=args.put_mode, prefix=args.pv_prefix)
 
     config["description"] = "Simple math model demonstrating a number of variable types"
 
@@ -202,7 +203,9 @@ if __name__ == "__main__":
 
     if args.mode in ["remote", "snapshot"]:
         for k in ["input_a", "input_b", "input_c"]:
-            config["variables"][k]["mode"] = "remote"
+            v = config["variables"][k]
+            v["mode"] = "remote"
+            v["pv"] = f"{args.pv_prefix}{v['pv']}"  # Remap name with prefix
 
     runner = Runner(model=model, config=config)
     runner.run()
