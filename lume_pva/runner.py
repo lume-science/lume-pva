@@ -176,7 +176,7 @@ class Runner:
                 return True
 
             # Lookup variable based on name
-            vn = self.runner.pv_to_var.get(reason, None)
+            vn = self.runner._pv_to_variable(reason)
             if vn is None:
                 return False
 
@@ -292,18 +292,17 @@ class Runner:
             # Set default PV name if not provided
             if "pv" not in c:
                 c["pv"] = c["name"]
-            pv = c["pv"]
+
+            # Lookup variable based on name
+            var = self.model.supported_variables.get(c["name"])
 
             # Validate some other things first
-            if c["name"] not in self.model.supported_variables:
+            if var is None:
                 raise KeyError(f'Variable "{c["name"]}" not found in model variables')
             if "mode" in c and c["mode"] not in VALID_PV_MODES:
                 raise KeyError(
                     f'Variable "{c["name"]} has invalid mode "{c["mode"]}". Must be one of {VALID_PV_MODES}'
                 )
-
-            # Lookup variable based on name
-            var = self.model.supported_variables[c["name"]]
 
             # Determine a default mode, if there is none
             if "mode" not in c:
@@ -326,10 +325,18 @@ class Runner:
                 LOG.warning(f'Unsupported variable "{var.name}". Skipping.')
                 continue
 
+            # Remap the PV name. Prefix is applied only to standalone inputs and outputs, since clients are usually
+            # consuming remote data that doesn't need to be made unique.
+            if c["mode"] == "remote":
+                pv = c["pv"]
+            else:
+                pv = self.config.get("prefix", "") + c["pv"]
+
             # Cache handler and type for later
             self.pv_handlers[var.name] = handler
             self.types[var.name] = handler.create_type(var)
 
+            # Map pv -> var (and vice versa)
             self.pv_to_var[pv] = var.name
             self.var_to_pv[var.name] = pv
 
@@ -339,7 +346,6 @@ class Runner:
                     pv,
                     var,
                     ro=c["mode"] == "ro",
-                    prefix=self.config.get("prefix", ""),
                     handler=handler,
                 )
             else:
@@ -365,7 +371,7 @@ class Runner:
         # Start the CA server under the shared async context
         if len(self.pvdb.keys()) > 0:
             self.ca_server = pcaspy.SimpleServer()
-            self.ca_server.createPV(self.config.get("prefix", ""), self.pvdb)
+            self.ca_server.createPV("", self.pvdb)
             self.ca_driver = Runner.CaDriver(self)
 
             # Spin up a thread to run the pcaspy update loop
@@ -466,9 +472,7 @@ class Runner:
             }
         )
 
-    def _add_pv(
-        self, pv: str, var: Variable, ro: bool, prefix: str, handler: VariableHandler
-    ) -> None:
+    def _add_pv(self, pv: str, var: Variable, ro: bool, handler: VariableHandler) -> None:
         """
         Create a new PV for CA and/or PVA
 
@@ -486,7 +490,7 @@ class Runner:
             The variable handler for this variable type
         """
         if self.supports_pva:
-            LOG.debug(f"Creating PVA PV: pv={pv}")
+            LOG.debug(f"Creating PVA PV: {pv}")
             pvobj = SharedPV(
                 handler=Runner.Handler(
                     variable=var,
@@ -498,7 +502,7 @@ class Runner:
                 initial=self._generate_value(var.name, None),
             )
             self.pvs[var.name] = pvobj
-            self.providers[f"{prefix}{pv}"] = pvobj
+            self.providers[pv] = pvobj
 
         if self.supports_ca:
             # Generate a default value suitable for pcaspy
@@ -508,12 +512,12 @@ class Runner:
             if isinstance(default_value, list) and isinstance(default_value[0], str):
                 return
 
-            LOG.debug(f"Creating CA PV: pv={pv}")
+            LOG.debug(f"Creating CA PV: {pv}")
             spec = handler.ca_pvspec(var)
 
-            self.pvdb[f"{prefix}{pv}"] = spec
-            self.pvdb[f"{prefix}{pv}"].update({"asyn": True})
+            self.pvdb[pv] = spec
             # enable async for put-completion
+            self.pvdb[pv].update({"asyn": True})
             self.ca_pvs[var.name] = pv
 
     def _add_client(self, pv: str, var: Variable, monitor: bool) -> bool:
@@ -661,7 +665,7 @@ class Runner:
         LOG.debug(f"Snapshot taken for PVs: {self.snapshot_pvs}")
         new_values = {}
         for pv in self.snapshot_pvs:
-            new_values[self.pv_to_var[pv]] = {
+            new_values[self._pv_to_variable(pv)] = {
                 "value": self.pvua_context.get(pv),
                 "ts": time.time(),
             }
@@ -669,7 +673,7 @@ class Runner:
 
     def _monitor_callback(self, pvname, value, **kwargs):
         """Callback from p4p monitor updates"""
-        self._enqueue({self.pv_to_var[pvname]: {"value": value, "ts": time.time()}})
+        self._enqueue({self._pv_to_variable(pvname): {"value": value, "ts": time.time()}})
 
     def _generate_value(self, pv: str, value: Any | None, ts: float | None = None) -> Value:
         """
@@ -865,3 +869,11 @@ class Runner:
                 timestamp=pcaspy.cas.epicsTimeStamp.fromPosixTimeStamp(time.time()),
             )
             self.ca_driver.updatePV(self.status_control_pv)
+
+    def _variable_to_pv(self, name: str) -> str | None:
+        """Returns the PV name for the specified variable name"""
+        return self.var_to_pv.get(name)
+
+    def _pv_to_variable(self, pv: str) -> str | None:
+        """Returns the variable name associated with the PV"""
+        return self.pv_to_var.get(pv)
