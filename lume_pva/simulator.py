@@ -47,7 +47,7 @@ class SimpleSimulator:
         elif type in ["array1d"]:
             return NTNDArray()
 
-    def __init__(self, pvs: dict):
+    def __init__(self, pvs: dict, prefix: str = ""):
         """
         Initialize the simple PV simulator
 
@@ -66,9 +66,13 @@ class SimpleSimulator:
 
         """
         self.server = pcaspy.SimpleServer()
-        self.pvs = copy.deepcopy(pvs)
+        self.pvs = {}
         self.should_exit = False
         self.sleep_time = 0.001
+
+        # Build PV dict with prefix applied
+        for k, v in pvs.items():
+            self.pvs[prefix + k] = copy.deepcopy(pvs[k])
 
         # Build list of globals for eval() calls
         self.math_globals = {"t": 0}

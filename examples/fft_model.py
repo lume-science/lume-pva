@@ -7,6 +7,8 @@ from lume.variables import NDVariable, ScalarVariable
 from lume_pva.runner import Runner
 from lume_pva.simulator import SimpleSimulator
 
+from . import add_common_test_args
+
 
 class FFTModel(LUMEModel):
     """
@@ -152,7 +154,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("-v", action="store_true", help="Enable verbose logging")
+    add_common_test_args(parser)
     args = parser.parse_args()
 
     # Configure logging for debug if requested
@@ -183,16 +185,19 @@ if __name__ == "__main__":
                 "rate": 0.1,
                 "nvalues": 1024,
             },
-        }
+        },
+        prefix=args.pv_prefix,
     )
 
     model = FFTModel()
-    config = Runner.generate_config(model)
+    config = Runner.generate_config(model, put_mode=args.put_mode, prefix=args.pv_prefix)
 
     config["remote_model_mode"] = "continuous"
 
     for k in ["signal_a", "signal_b", "signal_c"]:
-        config["variables"][k]["mode"] = "remote"
+        v = config["variables"][k]
+        v["mode"] = "remote"
+        v["pv"] = f"{args.pv_prefix}{v['pv']}"  # Remap name with prefix
 
     runner = Runner(model=model, config=config)
     runner.run()

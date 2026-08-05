@@ -13,6 +13,8 @@ from lume.variables import (
 from lume_pva.runner import Runner
 from lume_pva.simulator import SimpleSimulator
 
+from . import add_common_test_args
+
 
 class SimpleMathModel(LUMEModel):
     """
@@ -149,7 +151,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("-v", action="store_true", help="Enable verbose logging")
+    add_common_test_args(parser)
     parser.add_argument(
         "--mode",
         type=str,
@@ -187,11 +189,12 @@ if __name__ == "__main__":
                     "rate": 0.09,
                 },
                 "input_d": {"type": "float", "mode": "expr", "expr": "10*t", "rate": 1},
-            }
+            },
+            prefix=args.pv_prefix,
         )
 
     model = SimpleMathModel()
-    config = Runner.generate_config(model)
+    config = Runner.generate_config(model, put_mode=args.put_mode, prefix=args.pv_prefix)
 
     config["description"] = "Simple math model demonstrating a number of variable types"
 
@@ -200,7 +203,9 @@ if __name__ == "__main__":
 
     if args.mode in ["remote", "snapshot"]:
         for k in ["input_a", "input_b", "input_c"]:
-            config["variables"][k]["mode"] = "remote"
+            v = config["variables"][k]
+            v["mode"] = "remote"
+            v["pv"] = f"{args.pv_prefix}{v['pv']}"  # Remap name with prefix
 
     runner = Runner(model=model, config=config)
     runner.run()
