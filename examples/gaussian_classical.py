@@ -155,31 +155,34 @@ class GaussianDenoiserModel(LUMEModel):
 if __name__ == "__main__":
     import argparse
     import logging
+    from examples import add_common_test_args
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-v", action="store_true", help="Enable verbose logging")
+    parser = argparse.ArgumentParser(description="Classical Gaussian denoiser (curve fit)")
+    add_common_test_args(parser)
+    parser.add_argument("--sim-prefix", dest="sim_prefix", default="SIM:", type=str,
+                        help="Prefix of the simulator PVs to subscribe to (default: SIM:)")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.DEBUG if args.v else logging.INFO)
 
     model = GaussianDenoiserModel()
-    config = Runner.generate_config(model, prefix="")
+    config = Runner.generate_config(model, put_mode=args.put_mode, prefix=args.pv_prefix)
 
     config["remote_model_mode"] = "continuous"
     config["description"] = "Classical Gaussian denoiser (curve fit)"
 
-    # Subscribe to simulator PVs
+    # Subscribe to simulator PVs (using sim-prefix)
     config["variables"]["noisy_signal"]["mode"] = "remote"
-    config["variables"]["noisy_signal"]["pv"] = "SIM:noisy_signal"
+    config["variables"]["noisy_signal"]["pv"] = f"{args.sim_prefix}noisy_signal"
     config["variables"]["x_axis"]["mode"] = "remote"
-    config["variables"]["x_axis"]["pv"] = "SIM:x_axis"
+    config["variables"]["x_axis"]["pv"] = f"{args.sim_prefix}x_axis"
 
     runner = Runner(model=model, config=config)
-    print("Classical Denoiser running (prefix=none)")
-    print("  Subscribes to: SIM:noisy_signal, SIM:x_axis")
-    print("  Serves: est_mean, est_sigma, est_amplitude")
-    print("          denoised_signal, fit_quality")
-    print("  Try:  pvmonitor est_mean est_sigma fit_quality")
+    print(f"Classical Denoiser running (prefix={args.pv_prefix})")
+    print(f"  Subscribes to: {args.sim_prefix}noisy_signal, {args.sim_prefix}x_axis")
+    print(f"  Serves: {args.pv_prefix}est_mean, {args.pv_prefix}est_sigma, {args.pv_prefix}est_amplitude")
+    print(f"          {args.pv_prefix}denoised_signal, {args.pv_prefix}fit_quality")
+    print(f"  Try:  pvmonitor {args.pv_prefix}est_mean {args.pv_prefix}est_sigma {args.pv_prefix}fit_quality")
     runner.run()
 
 

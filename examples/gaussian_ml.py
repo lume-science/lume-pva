@@ -295,11 +295,14 @@ class GaussianMLDenoiserModel(LUMEModel):
 if __name__ == "__main__":
     import argparse
     import logging
+    from examples import add_common_test_args
 
     parser = argparse.ArgumentParser(
         description="ML Gaussian Denoiser — Neural network inference over EPICS"
     )
-    parser.add_argument("-v", action="store_true", help="Enable verbose logging")
+    add_common_test_args(parser)
+    parser.add_argument("--sim-prefix", dest="sim_prefix", default="SIM:", type=str,
+                        help="Prefix of the simulator PVs to subscribe to (default: SIM:)")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.DEBUG if args.v else logging.INFO)
@@ -308,7 +311,7 @@ if __name__ == "__main__":
     model = GaussianMLDenoiserModel()
 
     # Generate Runner configuration
-    config = Runner.generate_config(model, prefix="")
+    config = Runner.generate_config(model, put_mode=args.put_mode, prefix=args.pv_prefix)
 
     # Set continuous mode (subscribe to remote PVs with monitors)
     config["remote_model_mode"] = "continuous"
@@ -316,19 +319,19 @@ if __name__ == "__main__":
 
     # Wire inputs to simulator PVs (same PVs as the classical denoiser)
     config["variables"]["noisy_signal"]["mode"] = "remote"
-    config["variables"]["noisy_signal"]["pv"] = "SIM:noisy_signal"
+    config["variables"]["noisy_signal"]["pv"] = f"{args.sim_prefix}noisy_signal"
     config["variables"]["x_axis"]["mode"] = "remote"
-    config["variables"]["x_axis"]["pv"] = "SIM:x_axis"
+    config["variables"]["x_axis"]["pv"] = f"{args.sim_prefix}x_axis"
 
     # Create Runner and start
     runner = Runner(model=model, config=config)
 
     print("\n" + "═" * 60)
-    print("ML Denoiser running (prefix=none)")
-    print("  Subscribes to: SIM:noisy_signal, SIM:x_axis")
-    print("  Serves: ml_est_mean, ml_est_sigma, ml_est_amplitude")
-    print("          ml_denoised, ml_fit_quality, ml_infer_time")
-    print("  Try:  pvmonitor ml_est_mean ml_est_sigma ml_infer_time")
+    print(f"ML Denoiser running (prefix={args.pv_prefix})")
+    print(f"  Subscribes to: {args.sim_prefix}noisy_signal, {args.sim_prefix}x_axis")
+    print(f"  Serves: {args.pv_prefix}ml_est_mean, {args.pv_prefix}ml_est_sigma, {args.pv_prefix}ml_est_amplitude")
+    print(f"          {args.pv_prefix}ml_denoised, {args.pv_prefix}ml_fit_quality, {args.pv_prefix}ml_infer_time")
+    print(f"  Try:  pvmonitor {args.pv_prefix}ml_est_mean {args.pv_prefix}ml_est_sigma {args.pv_prefix}ml_infer_time")
     print("═" * 60 + "\n")
 
     runner.run()

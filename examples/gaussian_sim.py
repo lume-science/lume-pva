@@ -30,6 +30,30 @@ def generate_gaussian(mean, sigma, amplitude, noise_level):
 
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Gaussian beam profile simulator")
+    parser.add_argument("-v", action="store_true", help="Enable verbose logging")
+    parser.add_argument("--pv-prefix", dest="pv_prefix", default="SIM:", type=str,
+                        help="Prefix for all served PVs (default: SIM:)")
+    args = parser.parse_args()
+
+    import logging
+    logging.basicConfig(level=logging.DEBUG if args.v else logging.INFO)
+
+    prefix = args.pv_prefix
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Gaussian beam profile simulator")
+    parser.add_argument("-v", action="store_true", help="Enable verbose logging")
+    parser.add_argument("--pv-prefix", dest="pv_prefix", default="SIM:", type=str,
+                        help="Prefix for all served PVs (default: SIM:)")
+    args = parser.parse_args()
+
+    import logging
+    logging.basicConfig(level=logging.DEBUG if args.v else logging.INFO)
+
+    prefix = args.pv_prefix
     # Create PVs
     pv_noisy = SharedPV(nt=NTNDArray(), initial=np.zeros(NUM_POINTS, dtype=np.float64))
     pv_clean = SharedPV(nt=NTNDArray(), initial=np.zeros(NUM_POINTS, dtype=np.float64))
@@ -39,19 +63,19 @@ if __name__ == "__main__":
     pv_snr = SharedPV(nt=NTScalar("d"), initial=0.0)
 
     providers = {
-        "SIM:noisy_signal": pv_noisy,
-        "SIM:clean_signal": pv_clean,
-        "SIM:x_axis": pv_x_axis,
-        "SIM:mean": pv_mean,
-        "SIM:sigma": pv_sigma,
-        "SIM:snr": pv_snr,
+        f"{prefix}noisy_signal": pv_noisy,
+        f"{prefix}clean_signal": pv_clean,
+        f"{prefix}x_axis": pv_x_axis,
+        f"{prefix}mean": pv_mean,
+        f"{prefix}sigma": pv_sigma,
+        f"{prefix}snr": pv_snr,
     }
 
     with Server(providers=[providers]):
         print("Gaussian Simulator running")
-        print("  PVs: SIM:noisy_signal, SIM:clean_signal, SIM:x_axis")
-        print("        SIM:mean, SIM:sigma, SIM:snr")
-        print("  Try:  pvmonitor SIM:mean SIM:sigma SIM:snr")
+        print(f"  PVs: {prefix}noisy_signal, {prefix}clean_signal, {prefix}x_axis")
+        print(f"        {prefix}mean, {prefix}sigma, {prefix}snr")
+        print(f"  Try:  pvmonitor {prefix}mean {prefix}sigma {prefix}snr")
 
         t = 0.0
         try:
