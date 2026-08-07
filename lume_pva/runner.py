@@ -26,12 +26,6 @@ from lume_pva.variables import VariableHandler, find_variable_handler
 LOG = logging.getLogger("LumePva")
 logging.getLogger("pcaspy").setLevel(logging.WARNING)
 
-VALID_PV_MODES = ["rw", "ro", "remote"]
-VALID_MODEL_MODES = ["continuous", "snapshot"]
-
-DEFAULT_MODEL_MODE = "continuous"
-DEFAULT_PV_MODE = "rw"
-
 
 class ModelState(IntEnum):
     Idle = 0
@@ -41,6 +35,21 @@ class ModelState(IntEnum):
 class PutMode(str, Enum):
     Immediate = "immediate"
     Complete = "complete"
+
+
+class VariableMode(str, Enum):
+    RO = "ro"
+    RW = "rw"
+    Remote = "remote"
+
+
+class ModelMode(str, Enum):
+    Continuous = "continuous"
+    Snapshot = "snapshot"
+
+
+DEFAULT_MODEL_MODE = ModelMode.Continuous
+DEFAULT_PV_MODE = VariableMode.RW
 
 
 class RunnerVariable(TypedDict):
@@ -176,7 +185,7 @@ class Runner:
                 return True
 
             # Lookup variable based on name
-            vn = self.runner._pv_to_variable(reason)
+            vn = self.runner.pv_to_var[reason]
             if vn is None:
                 return False
 
@@ -218,7 +227,7 @@ class Runner:
                 done=lambda error: _complete_put(),
             )
 
-            if self.runner._put_mode() == PutMode.Immediate:
+            if self.runner.put_mode == PutMode.Immediate:
                 _complete_put()
             return True
 
@@ -277,9 +286,9 @@ class Runner:
         self.supports_pva = "pva" in self.protos
 
         # Validate some configuration options
-        if config.get("remote_model_mode", DEFAULT_MODEL_MODE) not in VALID_MODEL_MODES:
+        if config.get("remote_model_mode", DEFAULT_MODEL_MODE) not in ModelMode:
             raise KeyError(
-                f"Model has invalid model mode {config['remote_model_mode']}. Must be one of {VALID_MODEL_MODES}"
+                f"Model has invalid model mode {config['remote_model_mode']}. Must be one of {', '.join([x.name for x in ModelMode])}"
             )
 
         self.update_rate = config.get("update_rate", 0.1)
@@ -299,17 +308,17 @@ class Runner:
             # Validate some other things first
             if var is None:
                 raise KeyError(f'Variable "{c["name"]}" not found in model variables')
-            if "mode" in c and c["mode"] not in VALID_PV_MODES:
+            if "mode" in c and c["mode"] not in VariableMode:
                 raise KeyError(
-                    f'Variable "{c["name"]} has invalid mode "{c["mode"]}". Must be one of {VALID_PV_MODES}'
+                    f'Variable "{c["name"]} has invalid mode "{c["mode"]}". Must be one of {", ".join([x.name for x in VariableMode])}'
                 )
 
             # Determine a default mode, if there is none
             if "mode" not in c:
-                c["mode"] = "ro" if var.read_only else "rw"
+                c["mode"] = VariableMode.RO if var.read_only else VariableMode.RW
 
             # Validate r/w setting
-            if c["mode"] == "rw" and var.read_only:
+            if c["mode"] == VariableMode.RW and var.read_only:
                 raise ValueError(
                     f"Variable {c['name']} was configured with read-write permissions, but the variable is read-only"
                 )
@@ -340,12 +349,12 @@ class Runner:
             self.pv_to_var[pv] = var.name
             self.var_to_pv[var.name] = pv
 
-            if c["mode"] in ["ro", "rw"]:
+            if c["mode"] in [VariableMode.RO, VariableMode.RW]:
                 # Generate a PV to be served
                 self._add_pv(
                     pv,
                     var,
-                    ro=c["mode"] == "ro",
+                    ro=c["mode"] == VariableMode.RO,
                     handler=handler,
                 )
             else:
@@ -354,7 +363,7 @@ class Runner:
                     pv,
                     var,
                     monitor=self.config["remote_model_mode"]
-                    == "continuous",  # Use monitor if in continuous mode
+                    == ModelMode.Continuous,  # Use monitor if in continuous mode
                 )
 
         # Create an informational PV (i.e. including list of variables, etc.)
@@ -421,7 +430,7 @@ class Runner:
         """
         config = {
             "description": "",
-            "remote_model_mode": "continuous",
+            "remote_model_mode": ModelMode.Continuous,
             "prefix": prefix,
             "max_array_bytes": os.environ.get("EPICS_CA_MAX_ARRAY_BYTES", "80000000"),
             "put_mode": put_mode,
@@ -429,9 +438,9 @@ class Runner:
             "variables": {},
         }
         for k, v in model.supported_variables.items():
-            mode = "ro" if v.read_only else "rw"
+            mode = VariableMode.RO if v.read_only else VariableMode.RW
             if remote_inputs and not v.read_only:
-                mode = "remote"
+                mode = VariableMode.Remote
             if name_transformer is not None:
                 pv = name_transformer(v, v.name)
             else:
@@ -497,7 +506,7 @@ class Runner:
                     runner=self,
                     read_only=ro,
                     handler=handler,
-                    put_mode=self._put_mode(),
+                    put_mode=self.put_mode,
                 ),
                 initial=self._generate_value(var.name, None),
             )
@@ -665,7 +674,7 @@ class Runner:
         LOG.debug(f"Snapshot taken for PVs: {self.snapshot_pvs}")
         new_values = {}
         for pv in self.snapshot_pvs:
-            new_values[self._pv_to_variable(pv)] = {
+            new_values[self.pv_to_var[pv]] = {
                 "value": self.pvua_context.get(pv),
                 "ts": time.time(),
             }
@@ -673,7 +682,7 @@ class Runner:
 
     def _monitor_callback(self, pvname, value, **kwargs):
         """Callback from p4p monitor updates"""
-        self._enqueue({self._pv_to_variable(pvname): {"value": value, "ts": time.time()}})
+        self._enqueue({self.pv_to_var[pvname]: {"value": value, "ts": time.time()}})
 
     def _generate_value(self, pv: str, value: Any | None, ts: float | None = None) -> Value:
         """
@@ -793,16 +802,14 @@ class Runner:
                         continue
 
                     # Update PVA component
-                    pv = self.pvs.get(k)
-                    if pv is not None:
+                    if (pv := self.pvs.get(k)) is not None:
                         try:
                             pv.post(self._generate_value(k, v, latest_ts))
                         except Exception as e:
                             LOG.error(f"Error posting value for {k}: {e}")
 
                     # Update CA component
-                    capv = self.ca_pvs.get(k)
-                    if capv is not None and self.ca_driver is not None:
+                    if (capv := self.ca_pvs.get(k)) is not None and self.ca_driver is not None:
                         # pcaspy can only understand native python types, not necessarily what the model gives us.
                         nv = self.pv_handlers[k].value_to_native(
                             self.model.supported_variables[k], v
@@ -826,7 +833,7 @@ class Runner:
                 self._reset_to_cached_state()
             finally:
                 # With simulation completed, signal put completion to any waiting clients.
-                for cb in done_callbacks if self._put_mode() == PutMode.Complete else []:
+                for cb in done_callbacks if self.put_mode == PutMode.Complete else []:
                     try:
                         cb(sim_error)
                     except Exception as excp:
@@ -855,7 +862,8 @@ class Runner:
         LOG.debug(f"Caching model state: {state}")
         self._cached_state = state
 
-    def _put_mode(self) -> PutMode:
+    @property
+    def put_mode(self) -> PutMode:
         return self.config.get("put_mode", PutMode.Immediate)
 
     def _set_model_state(self, state: ModelState):
@@ -869,11 +877,3 @@ class Runner:
                 timestamp=pcaspy.cas.epicsTimeStamp.fromPosixTimeStamp(time.time()),
             )
             self.ca_driver.updatePV(self.status_control_pv)
-
-    def _variable_to_pv(self, name: str) -> str | None:
-        """Returns the PV name for the specified variable name"""
-        return self.var_to_pv.get(name)
-
-    def _pv_to_variable(self, pv: str) -> str | None:
-        """Returns the variable name associated with the PV"""
-        return self.pv_to_var.get(pv)
