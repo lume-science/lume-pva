@@ -168,6 +168,12 @@ if __name__ == "__main__":
     model = GaussianDenoiserModel()
     config = Runner.generate_config(model, put_mode=args.put_mode, prefix=args.pv_prefix)
 
+    # Which protocol(s) the Runner SERVER uses to SERVE output PVs.
+    # ["pva"] = PVA only (no pcaspy CA server, no CA port listeners)
+    # ["ca", "pva"] = both (default)
+    # ONLY affects serving. Client side (pvua subscribing to remote PVs) is unaffected.
+    config["protocol"] = args.pv_server_protocol
+
     config["remote_model_mode"] = "continuous"
     config["description"] = "Classical Gaussian denoiser (curve fit)"
 

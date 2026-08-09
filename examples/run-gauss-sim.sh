@@ -1,9 +1,9 @@
 #!/bin/bash
 # Start the Gaussian simulator in a tmux session
 # PVs served: SIM:mean, SIM:sigma, SIM:snr, SIM:noisy_signal, SIM:clean_signal, SIM:x_axis
-# Protocol: PVA only (no CA — uses p4p directly)
+# Protocol: PVA only (uses p4p directly, no pcaspy, no CA)
 SRCDIR="$HOME/controls/lume-pva/lume-pva-src"
-ENVSCRIPT="$HOME/controls/lume-pva/epics-env.sh"
+ENVSCRIPT="$SRCDIR/examples/epics-env-localhost.sh"
 SESSION="gauss-sim"
 PREFIX="SIM:"
 
@@ -13,4 +13,5 @@ tmux send-keys -t $SESSION "conda activate lume-pva && source $ENVSCRIPT && cd $
 
 echo "Started: $SESSION (prefix=$PREFIX)"
 echo "  PVs: ${PREFIX}mean, ${PREFIX}sigma, ${PREFIX}snr, ${PREFIX}noisy_signal"
+echo "  Protocol: PVA only (p4p native)"
 echo "  Attach: tmux attach -t $SESSION"
