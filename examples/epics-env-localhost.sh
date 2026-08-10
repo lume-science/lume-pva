@@ -1,5 +1,5 @@
 # EPICS environment for local lume-pva development
-# Source this in every terminal: source ~/controls/lume-pva/epics-env.sh
+# Source this in every terminal:
 
 # Client-side: where to search for PVs
 export EPICS_CA_ADDR_LIST=127.0.0.1
