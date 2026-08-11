@@ -176,8 +176,8 @@ class SimpleSimulator:
 
             # Update the value if we have a new one
             if nv is not None:
-                self.providers[k].post(nv, timestamp=time.monotonic())
-                self.driver.setParam(k, nv, timestamp=time.monotonic())
+                self.providers[k].post(nv, timestamp=time.time())
+                self.driver.setParam(k, nv, timestamp=time.time())
                 self.driver.updatePV(k)
 
     def wait(self):
