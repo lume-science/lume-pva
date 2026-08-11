@@ -4,7 +4,7 @@ import os
 import threading
 import time
 from collections.abc import Callable
-from enum import Enum, IntEnum
+from enum import IntEnum, StrEnum
 from queue import Empty, Queue
 from typing import Any, TypedDict
 
@@ -32,18 +32,18 @@ class ModelState(IntEnum):
     Simulating = 1
 
 
-class PutMode(str, Enum):
+class PutMode(StrEnum):
     Immediate = "immediate"
     Complete = "complete"
 
 
-class VariableMode(str, Enum):
+class VariableMode(StrEnum):
     RO = "ro"
     RW = "rw"
     Remote = "remote"
 
 
-class ModelMode(str, Enum):
+class ModelMode(StrEnum):
     Continuous = "continuous"
     Snapshot = "snapshot"
 
