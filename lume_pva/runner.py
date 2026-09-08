@@ -545,7 +545,7 @@ class Runner:
 
     def _create_model_info(self):
         """Creates a model info PV for PVA"""
-        pv = "model_info"
+        pv = "MODEL_INFO"
 
         envs = [
             "EPICS_CA_ADDR_LIST",
