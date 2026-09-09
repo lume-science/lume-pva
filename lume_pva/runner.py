@@ -545,7 +545,7 @@ class Runner:
 
     def _create_model_info(self):
         """Creates a model info PV for PVA"""
-        pv = "model_info"
+        pv = "MODEL_INFO"
 
         envs = [
             "EPICS_CA_ADDR_LIST",
@@ -625,6 +625,9 @@ class Runner:
         status_control_pvname = f"{self.config['prefix']}STATUS"
         self.status_control_pv = status_control_pvname
 
+        self.cycle_time_pv = f"{self.config['prefix']}CYCLE_TIME"
+        self.cycle_count_pv = f"{self.config['prefix']}CYCLE_COUNT"
+
         def conflict_check(x):
             if x in self.pvdb or x in self.providers:
                 raise RuntimeError(f"Fatal name conflict: {x} already exists in the PV database!")
@@ -634,6 +637,8 @@ class Runner:
         # Create PVA shared PVs for snapshot and reset if PVA is enabled
         if self.supports_pva:
             self.providers[snapshot_pvname] = SharedPV(initial=NTScalar("d").wrap(0))
+            self.providers[self.cycle_time_pv] = SharedPV(nt=NTScalar("d"), initial=0.0)
+            self.providers[self.cycle_count_pv] = SharedPV(nt=NTScalar("i"), initial=0)
 
             @self.providers[snapshot_pvname].put
             def onPut(pv, op):
@@ -666,12 +671,18 @@ class Runner:
             self.pvdb[snapshot_pvname] = {
                 "type": "int",
                 "value": 0,
-                "asyn": False,
             }
             self.pvdb[reset_pvname] = {
                 "type": "int",
                 "value": 0,
-                "asyn": False,
+            }
+            self.pvdb[self.cycle_time_pv] = {
+                "type": "float",
+                "value": 0,
+            }
+            self.pvdb[self.cycle_count_pv] = {
+                "type": "int",
+                "value": 0,
             }
             self.pvdb[status_control_pvname] = {"type": "enum", "enums": ["Idle", "Simulating"]}
 
@@ -716,6 +727,20 @@ class Runner:
             ts = time.time()
         value["timeStamp"]["nanoseconds"] = math.fmod(ts, 1.0) * 1e9
         value["timeStamp"]["secondsPastEpoch"] = int(ts)
+
+    def _update_cycle_pvs(self, elapsed: float) -> None:
+        """Updates the cycle count and cycle time PVs"""
+        if self.supports_pva:
+            self.providers[self.cycle_time_pv].post(elapsed)
+            cc = self.providers[self.cycle_count_pv]
+            cc.post(cc.current() + 1)
+        if self.supports_ca:
+            self.ca_driver.setParam(self.cycle_time_pv, elapsed)
+            self.ca_driver.updatePV(self.cycle_time_pv)
+            self.ca_driver.setParam(
+                self.cycle_count_pv, self.ca_driver.getParam(self.cycle_count_pv) + 1
+            )
+            self.ca_driver.updatePV(self.cycle_count_pv)
 
     @property
     def config(self) -> RunnerConfig:
@@ -834,9 +859,10 @@ class Runner:
                 if self.ca_driver is not None:
                     self.ca_driver.updatePVs()
 
-                LOG.debug(
-                    f"PV update loop took {(time.perf_counter() - pv_update_start) * 1000.0:.3f} ms"
-                )
+                elapsed = time.perf_counter() - pv_update_start
+                LOG.debug(f"PV update loop took {elapsed * 1000.0:.3f} ms")
+                self._update_cycle_pvs(elapsed)
+
             except Exception as exc:
                 sim_error = str(exc)
                 LOG.error(f"Simulation Cycle Failed: ({sim_error}), resetting to cached value")
