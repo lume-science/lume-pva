@@ -228,27 +228,41 @@ class VariableHandler(ABC, Generic[VariableT]):
         """
         return {}
 
+    def set_metadata(self, variable: Variable, v: Value) -> None:
+        """
+        Sets common display metadata on a p4p Value, if supported by the Variable.
 
-class ScalarVariableHandler(VariableHandler[ScalarVariable | IntVariable]):
+        Parameters
+        ----------
+        variable : Variable
+            The variable to fetch metadata (description, unit, etc.) from.
+        v : Value
+            The p4p value.
+        """
+        if unit := getattr(variable, "unit", None):
+            v["display"]["units"] = unit
+        if desc := getattr(variable, "description", None):
+            v["display"]["description"] = desc
+
+
+class ScalarVariableHandler(VariableHandler[ScalarVariable | IntVariable], Generic[VariableT]):
     """Variable handler for LUME ScalarVariable, and the TorchScalarVariable type"""
 
     ScalarType = int | float | np.floating | np.integer
 
-    @staticmethod
-    def set_metadata(variable: Variable, v: Value, value: Any) -> None:
+    def set_metadata(self, variable: Variable, v: Value, value: Any) -> None:
         """
-        Sets control, display and alarm metadata on the value
+        Sets control, display and alarm metadata on the value. Skips metadata that doesn't exist
+        on 'variable'.
         """
+        super().set_metadata(variable, v)
+
         value_range = getattr(variable, "value_range", None)
         if value_range is not None:
             v["control"]["limitLow"] = value_range[0]
             v["control"]["limitHigh"] = value_range[1]
             v["display"]["limitLow"] = value_range[0]
             v["display"]["limitHigh"] = value_range[1]
-
-        unit = getattr(variable, "unit")
-        if unit is not None:
-            v["display"]["units"] = unit
 
         # This should arguably be moved somewhere else..but since value_range is specific to
         # variable types, we pretty much have to handle it here.
@@ -359,14 +373,28 @@ class NDVariableHandler(VariableHandler[NDVariable | TorchNDVariable]):
             return False
 
     def create_type(self, variable: NDVariable | TorchNDVariable) -> Type:
-        # NTNDArray (per the NT spec) does not support string[] as a value type. We'll deviate from the standard a bit here
+        # NTNDArray (per the NT spec) does not support string[] as a value type, nor does it support
+        # a display_t field. According to the NT spec, display_t should only be used in NT types with a
+        # single numeric 'value' field... We'll deviate from the spec a bit here.
+        extras = [
+            (
+                "display",
+                (
+                    "S",
+                    None,
+                    [
+                        ("description", "s"),
+                        ("units", "s"),
+                    ],
+                ),
+            )
+        ]
+
         if variable.dtype in [np.str_, np.dtypes.StringDType()]:
-            extras = [
+            extras += [
                 ("value", ("U", None, [("stringValue", "as")])),
             ]
-            return Type(extras, base=NTNDArray.buildType())
-        else:
-            return NTNDArray.buildType()
+        return Type(extras, base=NTNDArray.buildType())
 
     def pack_value(
         self,
@@ -387,6 +415,8 @@ class NDVariableHandler(VariableHandler[NDVariable | TorchNDVariable]):
 
         v["compressedSize"] = value.nbytes
         v["uncompressedSize"] = value.nbytes
+
+        self.set_metadata(variable, v)
 
         v["dimension"] = [
             {
@@ -462,7 +492,7 @@ class NDVariableHandler(VariableHandler[NDVariable | TorchNDVariable]):
 
 if TORCH_AVAILABLE:
 
-    class TorchScalarVariableHandler(VariableHandler[TorchScalarVariable]):
+    class TorchScalarVariableHandler(ScalarVariableHandler[TorchScalarVariable]):
         """Handler for TorchScalarVariable. Only available when torch and lume-torch are installed."""
 
         TorchScalarType = torch.Tensor | float | int
@@ -482,7 +512,7 @@ if TORCH_AVAILABLE:
             variable.validate_value(value)
 
             v = Value(type_, {"value": float(value)})
-            ScalarVariableHandler.set_metadata(variable, v, float(value))
+            self.set_metadata(variable, v, float(value))
             return v
 
         def unpack_value(self, variable: TorchScalarVariable, value: Value) -> float:
@@ -502,12 +532,15 @@ if TORCH_AVAILABLE:
         def value_to_native(self, variable: TorchScalarVariable, value: TorchScalarType) -> float:
             return float(value)
 
+        def ca_pvspec(self, variable):
+            return {}  # No extra fields for us.
+
 
 class SimpleScalarHandler(VariableHandler[StrVariable | BoolVariable]):
     """Handler for StrVariable, BoolVariable"""
 
     def create_type(self, variable: StrVariable | BoolVariable):
-        return NTScalar.buildType("s" if isinstance(variable, StrVariable) else "?")
+        return NTScalar.buildType("s" if isinstance(variable, StrVariable) else "?", display=True)
 
     def pack_value(
         self,
@@ -525,7 +558,9 @@ class SimpleScalarHandler(VariableHandler[StrVariable | BoolVariable]):
         if isinstance(variable, BoolVariable) and not isinstance(value, bool | int):
             raise ValueError(f"StrVariable {variable.name} expects str, but got {type(value)}")
 
-        return Value(type_, {"value": value})
+        v = Value(type_, {"value": value})
+        self.set_metadata(variable, v)
+        return v
 
     def unpack_value(self, variable: StrVariable | BoolVariable, value: Value) -> str | bool:
         if isinstance(variable, BoolVariable):
@@ -566,7 +601,7 @@ class EnumVariableHandler(VariableHandler):
     """Handler for EnumVariable"""
 
     def create_type(self, variable: EnumVariable) -> Type:
-        return NTEnum.buildType()
+        return NTEnum.buildType(display=True)
 
     def pack_value(self, variable: EnumVariable, type_: Type, value: int | str | None) -> Value:
         if value is None:
@@ -576,7 +611,7 @@ class EnumVariableHandler(VariableHandler):
         if isinstance(value, str):
             idx = variable.options.index(value)
 
-        return Value(
+        v = Value(
             type_,
             {
                 "value": {
@@ -585,6 +620,8 @@ class EnumVariableHandler(VariableHandler):
                 }
             },
         )
+        self.set_metadata(variable, v)
+        return v
 
     def unpack_value(self, variable: EnumVariable, value: Value) -> str:
         idx = value["value"]["index"]
