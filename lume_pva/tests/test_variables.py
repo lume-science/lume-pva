@@ -250,6 +250,66 @@ def test_dimension_size_metadata(variable, value, size):
 @pytest.mark.parametrize(
     (
         "variable",
+        "desc",
+        "unit",
+    ),
+    [
+        (
+            ScalarVariable(
+                name="myscalar", default_value=10.0, unit="hello", description="scalar1"
+            ),
+            "scalar1",
+            "hello",
+        ),
+        (
+            StrVariable(name="mystr", default_value="cool", description="cool scalar"),
+            "cool scalar",
+            None,
+        ),
+        (BoolVariable(name="mybool", default_value=False, description="my bool"), "my bool", None),
+        (
+            EnumVariable(
+                name="myenum", options=["A", "B", "C"], default_value="A", description="some enum"
+            ),
+            "some enum",
+            None,
+        ),
+        (
+            IntVariable(
+                name="myint", default_value=2, description="my int", unit="burgers per mile"
+            ),
+            "my int",
+            "burgers per mile",
+        ),
+        (
+            NDVariable(name="mynd", shape=(64, 64), unit="brightness", description="hello"),
+            "hello",
+            "brightness",
+        ),
+        (TorchScalarVariable(name="mytorch", description="test", unit="nope"), "test", "nope"),
+        (
+            TorchNDVariable(name="mytorchnd", description="torched", unit="volts", shape=(1, 1)),
+            "torched",
+            "volts",
+        ),
+    ],
+)
+def test_display_meta(variable: Variable, desc: str, unit: str | None) -> None:
+    handler = find_variable_handler(type(variable))
+    assert handler is not None
+
+    type_ = handler.create_type(variable)
+    v_ = handler.pack_value(variable, type_, None)
+
+    assert "display" in v_
+    if unit is not None:
+        assert v_["display"]["units"] == unit
+    assert v_["display"]["description"] == desc
+
+
+@pytest.mark.parametrize(
+    (
+        "variable",
         "expected_value",
     ),
     [
