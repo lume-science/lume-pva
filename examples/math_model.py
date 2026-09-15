@@ -47,6 +47,7 @@ class SimpleMathModel(LUMEModel):
                 default_value=1.0,
                 value_range=(-10.0, 10.0),
                 unit="dimensionless",
+                description="Input A",
                 read_only=False,
             ),
             "input_b": ScalarVariable(
@@ -54,6 +55,7 @@ class SimpleMathModel(LUMEModel):
                 default_value=1.0,
                 value_range=(-10.0, 10.0),
                 unit="dimensionless",
+                description="Input B",
                 read_only=False,
             ),
             "input_c": ScalarVariable(
@@ -61,6 +63,7 @@ class SimpleMathModel(LUMEModel):
                 default_value=1.0,
                 value_range=(-10.0, 10.0),
                 unit="dimensionless",
+                description="Input C",
                 read_only=False,
             ),
             "input_d": IntVariable(
@@ -68,12 +71,14 @@ class SimpleMathModel(LUMEModel):
                 default_value=1,
                 value_range=(-10, 10),
                 unit="dimensionless",
+                description="Input D",
                 read_only=False,
             ),
             "invert": BoolVariable(
                 name="invert",
                 default_value=False,
                 read_only=False,
+                description="Negate the sum output",
             ),
             "desc": StrVariable(
                 name="desc",
@@ -85,9 +90,13 @@ class SimpleMathModel(LUMEModel):
                 default_value=2.0,
                 unit="dimensionless",
                 read_only=True,  # This is computed, not set directly
+                description="Sum of A, B, C, D",
             ),
             "my_enum": EnumVariable(
-                name="my_enum", default_value="test1", options=["test1", "test2", "test3", "hello"]
+                name="my_enum",
+                default_value="test1",
+                options=["test1", "test2", "test3", "hello"],
+                description="A simple test enum",
             ),
         }
 

@@ -69,6 +69,7 @@ class FFTModel(LUMEModel):
                 unit="dimensionless",
                 shape=(1024,),
                 dtype=np.float64,
+                description="Real component of the FFT",
                 read_only=True,  # This is computed, not set directly
             ),
             "fft_imag": NDVariable(
@@ -76,6 +77,7 @@ class FFTModel(LUMEModel):
                 unit="dimensionless",
                 shape=(1024,),
                 dtype=np.float64,
+                description="Imaginary component of the FFT",
                 read_only=True,  # This is computed, not set directly
             ),
             "string_array": NDVariable(
@@ -83,6 +85,7 @@ class FFTModel(LUMEModel):
                 unit="dimensionless",
                 shape=(6,),
                 dtype=np.dtypes.StringDType(),
+                description="A (non-standard) string array",
                 read_only=True,  # This is a static output
             ),
             "2d_array": NDVariable(
