@@ -1,3 +1,4 @@
+import io
 import logging
 import math
 import os
@@ -5,6 +6,7 @@ import platform
 import threading
 import time
 from collections.abc import Callable
+from contextlib import nullcontext
 from enum import IntEnum, StrEnum
 from queue import Empty, Queue
 from typing import Any, TypedDict
@@ -913,3 +915,13 @@ class Runner:
                 timestamp=pcaspy.cas.epicsTimeStamp.fromPosixTimeStamp(time.time()),
             )
             self.ca_driver.updatePV(self.status_control_pv)
+
+    def dump_pv_list(self, path_or_stream: io.TextIOBase) -> None:
+        """Dump a list of PVs to a file, or other IO stream"""
+        if isinstance(path_or_stream, str):
+            s = open(path_or_stream, "w")
+        else:
+            s = nullcontext(path_or_stream)
+
+        with s as stream:
+            stream.writelines([x + "\n" for x in self.pv_to_var.keys()])
