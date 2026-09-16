@@ -820,7 +820,7 @@ class Runner:
 
                 # Get new simulated values
                 get_start = time.perf_counter()
-                out_values = self.model.get(self.model.supported_variables)
+                out_values = self.model.get(list(self.model.supported_variables.keys()))
                 LOG.debug(f"Model get() took {(time.perf_counter() - get_start) * 1000.0:.3f} ms")
 
                 # Update output PVs with new values
