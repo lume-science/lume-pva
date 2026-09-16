@@ -23,8 +23,8 @@ dependencies = [
     "pydantic",
     "numpy",
     "pyyaml",
-    "lume-base",
-    "pvua @ git+https://github.com/slac-epics/pvua",
+    "lume-base >= 0.6.0",
+    "pvua",
     "pcaspy"
 ]
 dynamic = ["version"]
@@ -34,7 +34,7 @@ version_file = "lume_pva/_version.py"
 [project.optional-dependencies]
 torch = [
     "torch",
-    "lume-torch @ git+https://github.com/lume-science/lume-torch",
+    "lume-torch",
 ]
 dev = [
     "pre-commit",
