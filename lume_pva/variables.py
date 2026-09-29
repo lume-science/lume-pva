@@ -340,13 +340,17 @@ class ScalarVariableHandler(VariableHandler[ScalarVariable | IntVariable], Gener
             type_ = "int"
         else:
             type_ = "float"
+        # value_range is published as display limits only. pcaspy's lolo/hihi alarm
+        # thresholds compare inclusively, so deriving them from value_range would put
+        # a valid value sitting exactly on a limit into MAJOR alarm, while PVA
+        # (strict comparison) reports NO_ALARM. Without lolo/hihi, pcaspy's numeric
+        # alarm check stays off. Trade-off: a value outside value_range no longer
+        # alarms on CA; PVA still reports MAJOR for it.
         return {
             "unit": variable.unit,
             "type": type_,
             "lolim": value_range[0],
             "hilim": value_range[1],
-            "lolo": value_range[0],
-            "hihi": value_range[1],
         }
 
 

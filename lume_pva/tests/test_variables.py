@@ -689,10 +689,18 @@ def test_raise_packing_invalid_value(
                 "type": "float",
                 "lolim": 0,
                 "hilim": 0,
-                "lolo": 0,
-                "hihi": 0,
             },
             id="scalar_no_extras",
+        ),
+        pytest.param(
+            ScalarVariable(name="x", value_range=(-1.0, 1.0)),
+            {
+                "unit": None,
+                "type": "float",
+                "lolim": -1.0,
+                "hilim": 1.0,
+            },
+            id="scalar_value_range_display_only",
         ),
         pytest.param(TorchScalarVariable(name="x"), {}, id="tscalar_no_extras"),
         pytest.param(
