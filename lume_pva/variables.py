@@ -280,7 +280,7 @@ class ScalarVariableHandler(VariableHandler[ScalarVariable | IntVariable], Gener
 
     def create_type(self, variable: ScalarVariable | IntVariable) -> Type:
         return NTScalar.buildType(
-            "d" if isinstance(variable, ScalarVariable) else "l",
+            "d" if type(variable) is ScalarVariable else "l",
             control=True,
             display=True,
         )
@@ -295,17 +295,23 @@ class ScalarVariableHandler(VariableHandler[ScalarVariable | IntVariable], Gener
             value = self.default_value(variable)
 
         # Force cast to int for int variables, otherwise we trip validation
-        if isinstance(variable, IntVariable):
-            value = int(value)
+        try:
+            if type(variable) is IntVariable:
+                value = int(value)
+            else:
+                value = float(value)
+        except Exception():
+            # If we've gotten here, value was probably bad... so raise a type error, same as validation.
+            raise TypeError(f"variable {variable.name} not compatible with type {type(value)}")
 
         variable.validate_value(value)
 
-        v = Value(type_, {"value": float(value)})
+        v = Value(type_, {"value": value})
         self.set_metadata(variable, v, value)
         return v
 
     def unpack_value(self, variable: ScalarVariable | IntVariable, value: Value) -> float | int:
-        if isinstance(variable, IntVariable):
+        if type(variable) is IntVariable:
             return int(value["value"])
         else:
             return float(value["value"])
@@ -317,13 +323,13 @@ class ScalarVariableHandler(VariableHandler[ScalarVariable | IntVariable], Gener
         native_python: bool = False,
     ):
         v = variable.default_value if variable.default_value is not None else 0
-        if isinstance(variable, IntVariable):
+        if type(variable) is IntVariable:
             return int(v)
         else:
             return float(v)
 
     def value_to_native(self, variable: ScalarVariable | IntVariable, value: ScalarType) -> Any:
-        if isinstance(variable, IntVariable):
+        if type(variable) is IntVariable:
             return int(value)
         else:
             return float(value)
@@ -336,7 +342,7 @@ class ScalarVariableHandler(VariableHandler[ScalarVariable | IntVariable], Gener
     def ca_pvspec(self, variable: ScalarVariable | IntVariable) -> dict:
         value_range = getattr(variable, "value_range", (0, 0))
         value_range = (0, 0) if value_range is None else value_range
-        if isinstance(variable, IntVariable):
+        if type(variable) is IntVariable:
             type_ = "int"
         else:
             type_ = "float"
@@ -408,7 +414,7 @@ class NDVariableHandler(VariableHandler[NDVariable | TorchNDVariable]):
         variable.validate_value(value)
 
         # Convert to numpy type for p4p's sake
-        if TORCH_AVAILABLE and isinstance(variable, TorchNDVariable):
+        if TORCH_AVAILABLE and type(variable) is TorchNDVariable:
             value = value.numpy()
 
         v = Value(type_, {"value": (self._typecode(variable), value.flatten())})
@@ -436,7 +442,7 @@ class NDVariableHandler(VariableHandler[NDVariable | TorchNDVariable]):
     ) -> ndarray | torch.Tensor:
         arr = value["value"]
         if isinstance(arr, np.ndarray):
-            if TORCH_AVAILABLE and isinstance(variable, TorchNDVariable):
+            if TORCH_AVAILABLE and type(variable) is TorchNDVariable:
                 return torch.reshape(torch.from_numpy(arr), variable.shape)
             else:
                 return arr.reshape(variable.shape)
@@ -453,9 +459,9 @@ class NDVariableHandler(VariableHandler[NDVariable | TorchNDVariable]):
         if value is None:
             if variable.dtype in [np.str_, np.dtypes.StringDType()]:
                 value = np.full(shape=(variable.shape), fill_value="", dtype=variable.dtype)
-            elif TORCH_AVAILABLE and isinstance(variable, TorchNDVariable):
+            elif TORCH_AVAILABLE and type(variable) is TorchNDVariable:
                 value = torch.zeros(size=variable.shape, dtype=variable.dtype)
-            elif isinstance(variable, NDVariable):
+            elif type(variable) is NDVariable:
                 value = np.zeros(shape=variable.shape, dtype=variable.dtype)
             else:
                 raise TypeError()
@@ -473,9 +479,9 @@ class NDVariableHandler(VariableHandler[NDVariable | TorchNDVariable]):
     def native_to_value(
         self, variable: NDVariable | TorchNDVariable, value: list
     ) -> ndarray | torch.Tensor:
-        if TORCH_AVAILABLE and isinstance(variable, TorchNDVariable):
+        if TORCH_AVAILABLE and type(variable) is TorchNDVariable:
             return torch.Tensor(value, size=variable.shape, dtype=variable.dtype)
-        elif isinstance(variable, NDVariable):
+        elif type(variable) is NDVariable:
             return np.array(value, dtype=variable.dtype).reshape(variable.shape)
         else:
             raise NotImplementedError()
@@ -540,7 +546,7 @@ class SimpleScalarHandler(VariableHandler[StrVariable | BoolVariable]):
     """Handler for StrVariable, BoolVariable"""
 
     def create_type(self, variable: StrVariable | BoolVariable):
-        return NTScalar.buildType("s" if isinstance(variable, StrVariable) else "?", display=True)
+        return NTScalar.buildType("s" if type(variable) is StrVariable else "?", display=True)
 
     def pack_value(
         self,
@@ -552,10 +558,10 @@ class SimpleScalarHandler(VariableHandler[StrVariable | BoolVariable]):
             value = self.default_value(variable)
 
         variable.validate_value(value)
-        if isinstance(variable, StrVariable) and not isinstance(value, str):
+        if type(variable) is StrVariable and not isinstance(value, str):
             raise ValueError(f"StrVariable {variable.name} expects str, but got {type(value)}")
 
-        if isinstance(variable, BoolVariable) and not isinstance(value, bool | int):
+        if type(variable) is BoolVariable and not isinstance(value, bool | int):
             raise ValueError(f"StrVariable {variable.name} expects str, but got {type(value)}")
 
         v = Value(type_, {"value": value})
@@ -563,7 +569,7 @@ class SimpleScalarHandler(VariableHandler[StrVariable | BoolVariable]):
         return v
 
     def unpack_value(self, variable: StrVariable | BoolVariable, value: Value) -> str | bool:
-        if isinstance(variable, BoolVariable):
+        if type(variable) is BoolVariable:
             return bool(value["value"])
         else:
             return str(value["value"])
@@ -576,9 +582,9 @@ class SimpleScalarHandler(VariableHandler[StrVariable | BoolVariable]):
     ) -> bool | str:
         if variable.default_value is not None:
             return variable.default_value
-        elif isinstance(variable, BoolVariable):
+        elif type(variable) is BoolVariable:
             return False
-        elif isinstance(variable, StrVariable):
+        elif type(variable) is StrVariable:
             return ""
         else:
             raise TypeError("Unsupported variable type for SimpleScalarHandler")
@@ -590,7 +596,7 @@ class SimpleScalarHandler(VariableHandler[StrVariable | BoolVariable]):
         return value
 
     def ca_pvspec(self, variable: StrVariable | BoolVariable):
-        if isinstance(variable, StrVariable):
+        if type(variable) is StrVariable:
             # Need to force record type and length for strings, otherwise default_value dictates the length.
             return {"type": "char", "count": 1024}
         else:

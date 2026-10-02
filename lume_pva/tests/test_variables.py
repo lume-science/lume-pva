@@ -607,6 +607,12 @@ def test_value_to_native(
             id="non_numeric_value",
         ),
         pytest.param(
+            IntVariable(name="x"),
+            "hello, I am a string, not an int or float!",
+            TypeError,
+            id="non_floating_or_integral_value",
+        ),
+        pytest.param(
             TorchScalarVariable(name="x"),
             "not-a-torch-number",
             TypeError,
@@ -693,6 +699,18 @@ def test_raise_packing_invalid_value(
                 "hihi": 0,
             },
             id="scalar_no_extras",
+        ),
+        pytest.param(
+            IntVariable(name="x"),
+            {
+                "unit": None,
+                "type": "int",
+                "lolim": 0,
+                "hilim": 0,
+                "lolo": 0,
+                "hihi": 0,
+            },
+            id="int_no_extras",
         ),
         pytest.param(TorchScalarVariable(name="x"), {}, id="tscalar_no_extras"),
         pytest.param(
