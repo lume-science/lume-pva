@@ -5,11 +5,15 @@ configuration logic (Runner.generate_config) using a stub model object — no
 servers are started and no network calls are made.
 """
 
+from queue import Queue
+from typing import Any
+
 import numpy as np
 import pytest
 from lume.variables import NDVariable, ScalarVariable, Variable
 
-from lume_pva.runner import Runner
+from lume_pva.runner import PutMode, Runner
+from lume_pva.variables import find_variable_handler
 
 
 class StubModel:
@@ -122,6 +126,93 @@ def test_control_pvs_create_pva_sharedpvs_when_pva_enabled() -> None:
     assert "RESET" in runner.providers
     assert "SNAPSHOT" not in runner.pvdb
     assert "RESET" not in runner.pvdb
+
+
+class _FixedOutputModel(StubModel):
+    """Stub model that returns the same values on every ``get``."""
+
+    def __init__(self, variables: dict[str, Variable], values: dict[str, Any]) -> None:
+        super().__init__(variables)
+        self.values = values
+
+    def get(self, names: list[str]) -> dict[str, Any]:
+        return {name: self.values[name] for name in names}
+
+    def set(self, values: dict[str, Any]) -> None:
+        pass
+
+
+class _RecordingCaDriver:
+    """Stand-in for the pcaspy driver that records what the runner publishes."""
+
+    def __init__(self) -> None:
+        self.params: dict[str, Any] = {"CYCLE_COUNT": 0}
+        self.published = False
+
+    def setParam(self, reason: str, value: Any, timestamp: Any = None) -> None:
+        self.params[reason] = value
+
+    def getParam(self, reason: str) -> Any:
+        return self.params[reason]
+
+    def updatePV(self, reason: str) -> None:
+        pass
+
+    def updatePVs(self) -> None:
+        self.published = True
+
+
+class _DrainedQueue(Queue):
+    """Queue that ends ``Runner.run`` once it is empty instead of blocking forever."""
+
+    def get(self, block: bool = True, timeout: float | None = None) -> Any:
+        if block and self.empty():
+            raise KeyboardInterrupt
+        return super().get(block, timeout)
+
+
+def _make_runner_ca_output_stub(model: StubModel) -> Runner:
+    runner = Runner.__new__(Runner)
+    runner.model = model
+    runner._config = {"prefix": "", "put_mode": PutMode.Complete}
+    runner.queue = _DrainedQueue()
+    runner.update_rate = 0.0
+    runner.supports_pva = False
+    runner.supports_ca = True
+    runner.providers = {}
+    runner.pvdb = {}
+    runner.pvs = {}
+    runner.subs = {}
+    runner.status_control_pv = "STATUS"
+    runner.cycle_time_pv = "CYCLE_TIME"
+    runner.cycle_count_pv = "CYCLE_COUNT"
+    runner.pv_handlers = {
+        name: find_variable_handler(type(var)) for name, var in model.supported_variables.items()
+    }
+    runner.ca_pvs = {name: name for name in model.supported_variables}
+    runner.ca_driver = _RecordingCaDriver()
+    runner._cached_state = {}
+    return runner
+
+
+def test_ca_output_that_cannot_convert_does_not_block_the_others(model: StubModel) -> None:
+    # 'image' is declared as an array, but the model hands back a nested list
+    values = {"image": [[0.0] * 4] * 4, "input_a": 1.5, "output_b": 3.0}
+    variables = {name: model.supported_variables[name] for name in values}
+    runner = _make_runner_ca_output_stub(_FixedOutputModel(variables, values))
+    errors: list[str | None] = []
+    runner._enqueue({}, done=errors.append)
+
+    # Returns once the queue is drained
+    runner.run()
+
+    driver = runner.ca_driver
+    assert "image" not in driver.params
+    assert driver.params["input_a"] == 1.5
+    assert driver.params["output_b"] == 3.0
+    assert driver.published
+    # One output that cannot be published does not fail the cycle
+    assert errors == [None]
 
 
 def _make_runner_model_info_stub(model: StubModel, variables: dict) -> Runner:

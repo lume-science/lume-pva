@@ -851,16 +851,19 @@ class Runner:
 
                     # Update CA component
                     if (capv := self.ca_pvs.get(k)) is not None and self.ca_driver is not None:
-                        # pcaspy can only understand native python types, not necessarily what the model gives us.
-                        nv = self.pv_handlers[k].value_to_native(
-                            self.model.supported_variables[k], v
-                        )
+                        try:
+                            # pcaspy can only understand native python types, not necessarily what the model gives us.
+                            nv = self.pv_handlers[k].value_to_native(
+                                self.model.supported_variables[k], v
+                            )
 
-                        self.ca_driver.setParam(
-                            capv,
-                            nv,
-                            pcaspy.cas.epicsTimeStamp.fromPosixTimeStamp(latest_ts),
-                        )
+                            self.ca_driver.setParam(
+                                capv,
+                                nv,
+                                pcaspy.cas.epicsTimeStamp.fromPosixTimeStamp(latest_ts),
+                            )
+                        except Exception as e:
+                            LOG.error(f"Error writing CA value for {k}: {e}")
 
                 if self.ca_driver is not None:
                     self.ca_driver.updatePVs()

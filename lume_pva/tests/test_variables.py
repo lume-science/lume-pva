@@ -597,6 +597,16 @@ def test_value_to_native(
     assert isinstance(native, expected_type)
 
 
+def test_value_to_native_refuses_non_array() -> None:
+    variable = NDVariable(name="arr", shape=(2, 3))
+    handler = find_variable_handler(type(variable))
+    assert handler is not None
+
+    # Same refusal as pack_value gives for a value that is not an array
+    with pytest.raises(TypeError):
+        handler.value_to_native(variable, [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+
+
 @pytest.mark.parametrize(
     ("variable", "value", "expected_exception"),
     [

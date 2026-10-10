@@ -474,6 +474,8 @@ class NDVariableHandler(VariableHandler[NDVariable | TorchNDVariable]):
     def value_to_native(
         self, variable: NDVariable | TorchNDVariable, value: ndarray | torch.Tensor
     ) -> list:
+        # Refuse anything that is not an array of the declared type, as pack_value does
+        variable.validate_value(value)
         return value.flatten().tolist()
 
     def native_to_value(
