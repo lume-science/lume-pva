@@ -10,6 +10,7 @@ import pytest
 from lume.variables import NDVariable, ScalarVariable, Variable
 
 from lume_pva.runner import Runner
+from lume_pva.variables import find_variable_handler
 
 
 class StubModel:
@@ -79,6 +80,29 @@ def test_no_variables() -> None:
     config = Runner.generate_config(empty_model)
 
     assert config["variables"] == {}
+
+
+def test_ca_pvs_served_read_only_are_put_in_the_read_only_access_group(model: StubModel) -> None:
+    runner = Runner.__new__(Runner)
+    runner.supports_pva = False
+    runner.supports_ca = True
+    runner.pvdb = {}
+    runner.ca_pvs = {}
+
+    # (pv name, variable name, served read-only)
+    served = [
+        ("input_a", "input_a", False),
+        ("input_a_ro", "input_a", True),
+        ("output_b", "output_b", True),
+    ]
+    for pv, name, ro in served:
+        var = model.supported_variables[name]
+        runner._add_pv(pv, var, ro=ro, handler=find_variable_handler(type(var)))
+
+    assert "asg" not in runner.pvdb["input_a"]
+    # A writable variable that the config serves read-only is covered too
+    assert runner.pvdb["input_a_ro"]["asg"] == "READ_ONLY"
+    assert runner.pvdb["output_b"]["asg"] == "READ_ONLY"
 
 
 def _make_runner_control_stub(protocol: list[str]) -> Runner:

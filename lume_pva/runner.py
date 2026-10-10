@@ -3,6 +3,7 @@ import logging
 import math
 import os
 import platform
+import tempfile
 import threading
 import time
 from collections.abc import Callable
@@ -58,6 +59,9 @@ class ModelMode(StrEnum):
 
 DEFAULT_MODEL_MODE = ModelMode.Continuous
 DEFAULT_PV_MODE = VariableMode.RW
+
+# Access security group of the CA PVs that are served read-only
+_CA_READ_ONLY_ASG = "READ_ONLY"
 
 
 class RunnerVariable(TypedDict):
@@ -388,6 +392,9 @@ class Runner:
         # Start the CA server under the shared async context
         if len(self.pvdb.keys()) > 0:
             self.ca_server = pcaspy.SimpleServer()
+            # Access security has to be loaded before the PVs are created
+            if any(spec.get("asg") == _CA_READ_ONLY_ASG for spec in self.pvdb.values()):
+                self._init_ca_access_security()
             self.ca_server.createPV("", self.pvdb)
             self.ca_driver = Runner.CaDriver(self)
 
@@ -398,6 +405,20 @@ class Runner:
 
         # Kick off an initial update to propagate any defaults the model may have set
         self._enqueue({})
+
+    @staticmethod
+    def _init_ca_access_security() -> None:
+        """
+        Load the access security rules for the CA server.
+        PVs in the read-only group grant no write access, every other PV stays writable.
+        """
+        rules = f"ASG(DEFAULT) {{ RULE(1, WRITE) }}\nASG({_CA_READ_ONLY_ASG}) {{ RULE(1, READ) }}\n"
+        with tempfile.NamedTemporaryFile("w", suffix=".acf", delete=False) as acf:
+            acf.write(rules)
+        try:
+            pcaspy.SimpleServer.initAccessSecurityFile(acf.name)
+        finally:
+            os.remove(acf.name)
 
     def _run_pcaspy(self):
         """Run pcaspy forever"""
@@ -535,6 +556,9 @@ class Runner:
             self.pvdb[pv] = spec
             # enable async for put-completion
             self.pvdb[pv].update({"asyn": True})
+            if ro:
+                # CA clients get no write access to a PV that is served read-only
+                self.pvdb[pv]["asg"] = _CA_READ_ONLY_ASG
             self.ca_pvs[var.name] = pv
 
     def _add_client(self, pv: str, var: Variable, monitor: bool) -> bool:

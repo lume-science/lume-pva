@@ -395,6 +395,31 @@ def test_failed_sim(harness: RunnerHandle):
     assert _caget("sum_output") == pytest.approx(8.4)
 
 
+def test_ca_put_to_read_only_pv_is_refused(harness: RunnerHandle) -> None:
+    # Keep the model gate open so regular put/get traffic can flow freely.
+    harness.release.set()
+
+    output_pv = epics.get_pv("sum_output")
+    assert output_pv.wait_for_connection(OP_TIMEOUT)
+    before = _caget("sum_output")
+
+    # The server grants no write access, so the client refuses the put
+    assert output_pv.write_access is False
+    with pytest.raises(epics.ca.CASeverityException, match="Write access denied"):
+        output_pv.put(123.0, wait=True, timeout=OP_TIMEOUT)
+    assert _caget("sum_output") == pytest.approx(before)
+
+    # A read-write PV still takes puts
+    input_pv = epics.get_pv("input_a")
+    assert input_pv.wait_for_connection(OP_TIMEOUT)
+    assert input_pv.write_access is True
+    harness.completed.clear()
+    epics.caput("input_a", 3.0, wait=True, timeout=OP_TIMEOUT)
+    assert _wait_model_post(harness, OP_TIMEOUT)
+    assert _caget("input_a") == pytest.approx(3.0)
+    assert _caget("sum_output") == pytest.approx(6.0)
+
+
 def test_pva_reset_calls_model_reset(harness: RunnerHandle) -> None:
     # Keep the model gate open so regular put/get traffic can flow freely.
     harness.release.set()
