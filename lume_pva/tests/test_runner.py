@@ -5,11 +5,14 @@ configuration logic (Runner.generate_config) using a stub model object — no
 servers are started and no network calls are made.
 """
 
+from queue import Queue
+from typing import Any
+
 import numpy as np
 import pytest
 from lume.variables import NDVariable, ScalarVariable, Variable
 
-from lume_pva.runner import Runner
+from lume_pva.runner import PutMode, Runner
 
 
 class StubModel:
@@ -150,3 +153,54 @@ def test_model_info_lists_only_configured_variables(model: StubModel) -> None:
     listed = [(v["name"], v["pvname"], v["mode"]) for v in info["supported_variables"]]
     assert listed == [("input_a", "input_a", "rw")]
     assert "MODEL_INFO" in runner.providers
+
+
+class _SnapshotFailsModel(StubModel):
+    """Stub model whose ``get`` raises, so the state snapshot of a cycle fails."""
+
+    def __init__(self, variables: dict[str, Variable]) -> None:
+        super().__init__(variables)
+        self.set_calls: list[dict[str, Any]] = []
+
+    def get(self, names: list[str]) -> dict[str, Any]:
+        raise RuntimeError("model state is unavailable")
+
+    def set(self, values: dict[str, Any]) -> None:
+        self.set_calls.append(values)
+
+
+class _OneCycleQueue(Queue):
+    """Queue that ends ``Runner.run`` once drained instead of blocking forever."""
+
+    def get(self, block: bool = True, timeout: float | None = None) -> Any:
+        if block and self.empty():
+            raise KeyboardInterrupt
+        return super().get(block, timeout)
+
+
+def _make_runner_cycle_stub(model: StubModel) -> Runner:
+    runner = Runner.__new__(Runner)
+    runner.model = model
+    runner._config = {"prefix": "", "put_mode": PutMode.Complete}
+    runner.queue = _OneCycleQueue()
+    runner.update_rate = 0.0
+    runner.providers = {}
+    runner.pvdb = {}
+    runner.status_control_pv = "STATUS"
+    runner._cached_state = {"input_a": 1.0}
+    return runner
+
+
+def test_failed_state_snapshot_completes_waiting_puts(model: StubModel) -> None:
+    failing_model = _SnapshotFailsModel(model.supported_variables)
+    runner = _make_runner_cycle_stub(failing_model)
+    errors: list[str | None] = []
+    runner._enqueue({"input_a": {"value": 2.0, "ts": 1.0}}, done=errors.append)
+
+    # Returns once the queue is drained; the failed cycle must not end the loop
+    runner.run()
+
+    # The waiting put is told about the failure
+    assert errors == ["model state is unavailable"]
+    # There is no snapshot for this cycle, so the older one is not applied again
+    assert failing_model.set_calls == [{}]
