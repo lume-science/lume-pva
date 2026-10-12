@@ -802,15 +802,18 @@ class Runner:
             if latest_ts <= 0:
                 latest_ts = time.time()
 
-            # Stash previous state
             settable_var_names = [
                 key for key, var in self.model.supported_variables.items() if not var.read_only
             ]
-            self._set_cached_state(self.model.get(settable_var_names))
+            # Until this cycle has taken its own snapshot there is nothing to roll back to
+            self._cached_state = {}
 
             # Set and simulate
             sim_error = None
             try:
+                # Stash previous state
+                self._set_cached_state(self.model.get(settable_var_names))
+
                 if reset_requested:
                     reset_start = time.perf_counter()
                     LOG.info("Reset requested through RESET control PV")
