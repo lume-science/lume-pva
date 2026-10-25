@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=75.0", "setuptools_scm[toml]"]
+requires = ["setuptools>=77.0", "setuptools_scm[toml]"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -19,13 +19,14 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 dependencies = [
-    "pydantic",
     "numpy",
-    "pyyaml",
     "lume-base >= 0.6.0",
     "pvua",
-    "pcaspy"
+    "pcaspy >= 0.8.1",
+    "p4p >= 4.2.2",
 ]
 dynamic = ["version"]
 [tool.setuptools_scm]
@@ -38,7 +39,6 @@ torch = [
 ]
 dev = [
     "pre-commit",
-    "p4p",
     "pyepics",
     "pytest",
 ]
@@ -53,9 +53,6 @@ docs = [
 [project.urls]
 Homepage = "https://github.com/lume-science/lume-pva"
 "Bug Tracker" = "https://github.com/lume-science/lume-pva/issues"
-
-[project.license]
-file = "LICENSE"
 
 [options]
 zip_safe = false
