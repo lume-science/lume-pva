@@ -659,24 +659,65 @@ class EnumVariableHandler(VariableHandler):
         }
 
 
-def find_variable_handler(variable_type: type[Variable]) -> VariableHandler | None:
-    VARIABLE_HANDLERS: dict[type[Variable], VariableHandler] = {
-        ScalarVariable: ScalarVariableHandler(),
-        IntVariable: ScalarVariableHandler(),
-        NDVariable: NDVariableHandler(),
-        BoolVariable: SimpleScalarHandler(),
-        StrVariable: SimpleScalarHandler(),
-        EnumVariable: EnumVariableHandler(),
-    }
-    if TORCH_AVAILABLE:
-        VARIABLE_HANDLERS[TorchScalarVariable] = TorchScalarVariableHandler()
-        VARIABLE_HANDLERS[TorchNDVariable] = NDVariableHandler()
+_VARIABLE_HANDLERS: dict[type[Variable], VariableHandler] = {
+    ScalarVariable: ScalarVariableHandler(),
+    IntVariable: ScalarVariableHandler(),
+    NDVariable: NDVariableHandler(),
+    BoolVariable: SimpleScalarHandler(),
+    StrVariable: SimpleScalarHandler(),
+    EnumVariable: EnumVariableHandler(),
+}
+if TORCH_AVAILABLE:
+    _VARIABLE_HANDLERS[TorchScalarVariable] = TorchScalarVariableHandler()
+    _VARIABLE_HANDLERS[TorchNDVariable] = NDVariableHandler()
 
+
+def find_variable_handler(variable_type: type[Variable]) -> VariableHandler | None:
     # Resolve using the class MRO so subclasses of supported variable types
     # automatically use their nearest matching base handler.
     for cls in variable_type.__mro__:
-        handler = VARIABLE_HANDLERS.get(cls)
+        handler = _VARIABLE_HANDLERS.get(cls)
         if handler is not None:
             return handler
 
     return None
+
+
+def register_variable_handler(
+    variable_type: type[Variable], handler: VariableHandler, override: bool = False
+):
+    """
+    Registers a new variable handler for the specified variable type.
+
+    Parameters
+    ----------
+    variable_type : type[Variable]
+        The variable type this handler will be used for.
+    handler : VariableHandler
+        The variable handler instance which will act as the handler.
+    override : bool
+        If true, override the handler for the variable type, if it exists.
+    """
+    if variable_type in _VARIABLE_HANDLERS.keys() and not override:
+        raise KeyError(f"Variable type {variable_type} is already handled")
+    _VARIABLE_HANDLERS[variable_type] = handler
+
+
+def unregister_variable_handler(variable_type: type[Variable]) -> bool:
+    """
+    Unregisters a variable handler based on the variable type it's supposed to handle.
+
+    Parameters
+    ----------
+    variable_type : type[Variable]
+        The variable type
+
+    Returns
+    -------
+    bool : True if removed.
+    """
+    try:
+        del _VARIABLE_HANDLERS[variable_type]
+    except KeyError:
+        return False
+    return True

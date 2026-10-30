@@ -32,6 +32,8 @@ from lume_pva.variables import (
     TorchScalarVariableHandler,
     VariableHandler,
     find_variable_handler,
+    register_variable_handler,
+    unregister_variable_handler,
 )
 
 
@@ -810,3 +812,32 @@ def test_should_resolve_handler_for_variable_subclasses(
 
     assert isinstance(handler, expected_handler_type)
     assert isinstance(handler, VariableHandler)
+
+
+def test_custom_variable_handler():
+    class MyFunError(Exception):
+        pass
+
+    class NewHandler(ScalarVariableHandler):
+        def pack_value(self, variable, type_, value):
+            raise MyFunError()
+
+    class MyVariable(ScalarVariable):
+        pass
+
+    register_variable_handler(MyVariable, NewHandler())
+
+    handler = find_variable_handler(MyVariable)
+    assert handler is not None
+
+    var = MyVariable(name="hi", default_value=0.5)
+    try:
+        type = handler.create_type(var)
+        handler.pack_value(10, type, None)
+    except MyFunError:
+        pass
+    except Exception:
+        unregister_variable_handler(MyVariable)
+        assert False
+
+    unregister_variable_handler(MyVariable)
